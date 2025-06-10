@@ -60,19 +60,16 @@ class VideoGenerator:
         """保存视频文件"""
         # 获取参数
         rotation_angle = DataProcessor.normalize_angle(params['rotation_angle'])
-        fov_info = DataProcessor.calculate_field_of_view(
-            data.shape, DataProcessor.load_yml_params(pt_file_dir)[0])
+        crop_datashape = (data.shape[0] - params['crop_x']*2, data.shape[1] - params['crop_y']*2)
+        fov_info = DataProcessor.calculate_field_of_view(crop_datashape, DataProcessor.load_yml_params(pt_file_dir)[0])
+        rotation_info = f"_Rotation_{rotation_angle:.1f}deg" if abs(rotation_angle) > 0.1 else ""     
         
         # 获取slice_thickness
         slice_thickness = None
         if optimizable_tensors and 'slice_thickness' in optimizable_tensors:
             slice_thickness = optimizable_tensors['slice_thickness'].detach().cpu().numpy().item()
-        
-        # 生成文件名
-        rotation_info = f"_Rotation_{rotation_angle:.1f}deg" if abs(rotation_angle) > 0.1 else ""
-        crop_info = f"_Crop_{params['crop_x']}x{params['crop_y']}" if params['crop_x'] > 0 or params['crop_y'] > 0 else ""
-        
-        video_filename = f"objp_layers_video{rotation_info}{crop_info}{fov_info}.mp4"
+           
+        video_filename = f"objp_layers_video{rotation_info}{fov_info}.mp4"
         video_filepath = os.path.join(self.save_dir, video_filename)
         
         # 生成视频帧
