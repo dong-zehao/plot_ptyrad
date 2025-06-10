@@ -119,19 +119,19 @@ class VideoGenerator:
         h, w = first_frame.shape[:2]
         
         # 确保尺寸为偶数
-        if w % 2 == 1 or h % 2 == 1:
+        h_crop = h - (h % 2)
+        w_crop = w - (w % 2)
+        
+        try:
+            # 主要方法：使用 MP4 格式
             with imageio.get_writer(video_filepath, fps=5, codec='libx264', 
                                   quality=8, macro_block_size=1) as writer:
                 for frame_path in frames:
                     image = imageio.imread(frame_path)
-                    if image.shape[1] % 2 == 1 or image.shape[0] % 2 == 1:
-                        h_crop = image.shape[0] - (image.shape[0] % 2)
-                        w_crop = image.shape[1] - (image.shape[1] % 2)
+                    # 确保图像尺寸为偶数
+                    if image.shape[0] != h_crop or image.shape[1] != w_crop:
                         image = image[:h_crop, :w_crop]
                     writer.append_data(image)
-        else:
-            with imageio.get_writer(video_filepath, fps=5, codec='libx264', 
-                                  quality=8, macro_block_size=1) as writer:
-                for frame_path in frames:
-                    image = imageio.imread(frame_path)
-                    writer.append_data(image)
+                    
+        except Exception as e:
+            print(f"    MP4编码失败: {e}")
