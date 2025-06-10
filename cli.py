@@ -14,13 +14,18 @@ def create_parser():
     """创建命令行参数解析器"""
     parser = argparse.ArgumentParser(
         prog='plot_ptyrad',
-        description="批量解析 PtyRAD .pt 文件并生成交互式可视化",
+        description="""
+plot_ptyrad 用于批量解析 ptyrad 重构的 .pt 文件并生成交互式可视化. 预期的文件夹组织结构为 /FOLDER/region/recons_folder/FILE. 
+其中 FOLDER 和 FILE 是用户指定的参数, region 是自动识别的区域编号, recons_folder 是 ptyrad 自动生成的文件夹.
+保存的图片和视频文件在/Data_Saved/region/ 目录下, 通过检测该目录中是否有视频和图片文件来判断是否已经处理过数据, 如果已经处理则跳过这组数据.
+如果指定了 --force 参数, 则会强制重新处理所有数据, 不管之前是否已经处理过.
+        """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
   plot_ptyrad --folder /path/to/All_Data_PtyRAD --file model_iter1000.pt
   plot_ptyrad --folder /path/to/All_Data_PtyRAD --file model_iter1000.pt --force
-  plot_ptyrad -f /data/experiments/run1 -F model_iter1000.pt --force
+  plot_ptyrad -f /path/to/All_Data_PtyRAD -F model_iter1000.pt --force
         """
     )
     
@@ -29,7 +34,7 @@ def create_parser():
         '--folder', '-f',
         type=str,
         required=True,
-        help='All_Data_PtyRAD文件夹路径'
+        help='存有多组ptyrad重构结果的文件夹路径.',
     )
     
     parser.add_argument(
@@ -44,12 +49,6 @@ def create_parser():
         '--force',
         action='store_true',
         help='强制重新处理所有数据，不跳过已处理的文件'
-    )
-    
-    parser.add_argument(
-        '--version',
-        action='version',
-        version='plot_ptyrad 1.0.0'
     )
     
     return parser
