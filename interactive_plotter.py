@@ -10,7 +10,7 @@ from config import PROCESSING_STATE, UI_LAYOUT, MATPLOTLIB_CONFIG
 from ui_components import UIComponents
 from data_processor import DataProcessor, ParameterManager
 from video_generator import VideoGenerator
-from file_utils import create_save_directory, check_if_processed
+from file_utils import check_if_processed
 
 
 class InteractivePlotter:
@@ -273,10 +273,8 @@ class InteractivePlotter:
         try:
             print(f"\n处理文件: {os.path.basename(pt_file_path)} (区域: {region_number})")
             
-            # 创建该区域的保存目录
-            region_save_dir = create_save_directory(os.path.dirname(self.save_dir), region_number)
-            
             # 检查是否已经生成过视频
+            region_save_dir = os.path.join(os.path.dirname(self.save_dir), region_number)
             if check_if_processed(region_save_dir, 'video'):
                 print(f"  区域 {region_number} 已存在视频文件，跳过...")
                 return

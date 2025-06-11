@@ -36,7 +36,6 @@ class DataProcessor:
         
         device = DataProcessor.get_device()
         data = torch.load(filepath, weights_only=False, map_location=device)
-        print(f"成功加载文件: {filepath}")
         return data
     
     @staticmethod
@@ -46,7 +45,6 @@ class DataProcessor:
             raise KeyError("在 .pt 文件中未找到 'optimizable_tensors' 键")
         
         optimizable_tensors = data['optimizable_tensors']
-        print(f"找到 {len(optimizable_tensors)} 个可优化张量")
         return optimizable_tensors
     
     @staticmethod
@@ -136,7 +134,7 @@ class ParameterManager:
             return DEFAULT_PARAMS.copy()
     
     @staticmethod
-    def auto_save_mat_file(save_dir, optimizable_tensors):
+    def auto_save_mat_file(save_dir, optimizable_tensors, pt_filename=None):
         """自动保存MAT文件（如果不存在）"""
         import glob
         mat_files = glob.glob(os.path.join(save_dir, '*.mat'))
@@ -157,9 +155,8 @@ class ParameterManager:
                 else:
                     mat_data[name] = tensor
             
-            mat_filename = "model_iter1000.mat"
+            mat_filename = pt_filename.replace('.pt', '.mat')
             mat_filepath = os.path.join(save_dir, mat_filename)
-            
             sio.savemat(mat_filepath, mat_data, format='5', do_compression=True)
             print(f"MAT文件已保存到: {mat_filepath}")
         except Exception as e:

@@ -6,14 +6,6 @@ import os
 import glob
 
 
-def create_save_directory(folder_path, region_number):
-    """创建保存目录结构"""
-    parent_dir = os.path.dirname(folder_path)
-    save_dir = os.path.join(parent_dir, 'Data_Saved', region_number)
-    os.makedirs(save_dir, exist_ok=True)
-    return save_dir
-
-
 def check_if_processed(save_dir, check_type='general', force=False):
     """检查是否已经处理过"""
     # 如果设置了强制重新处理，直接返回False
@@ -38,15 +30,18 @@ def find_pt_files(folder_path, filename_pattern):
         print(f"未找到目录: {folder_path}")
         return found_files
     
+    # 第一层：遍历FOLDER下的所有项目（作为区域名）
     for item in os.listdir(folder_path):
         region_path = os.path.join(folder_path, item)
-        if os.path.isdir(region_path):
-            for subitem in os.listdir(region_path):
-                subdir_path = os.path.join(region_path, subitem)
-                if os.path.isdir(subdir_path):
-                    pt_file_path = os.path.join(subdir_path, filename_pattern)
-                    if os.path.exists(pt_file_path):
-                        found_files.append((pt_file_path, item))
-                        print(f"找到文件: {pt_file_path} (区域: {item})")
+        if os.path.isdir(region_path): 
+            region_name = item  # 第一层子目录作为区域名
+            
+            # 递归搜索该区域目录下的所有.pt文件
+            for root, dirs, files in os.walk(region_path):
+                for file in files:
+                    if file == filename_pattern:  # 精确匹配文件名
+                        pt_file_path = os.path.join(root, file)
+                        found_files.append((pt_file_path, region_name))
+                        print(f"找到文件: {pt_file_path} (区域: {region_name})")
     
     return found_files
