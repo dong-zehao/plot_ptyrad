@@ -71,7 +71,7 @@ class VideoGenerator:
            
         video_filename = f"objp_layers_video{rotation_info}{fov_info}.mp4"
         video_filepath = os.path.join(self.save_dir, video_filename)
-        if ~os.path.exists(self.save_dir):
+        if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
         
         # 生成视频帧
