@@ -31,7 +31,7 @@ def find_pt_files(folder_path, filename_pattern):
         return found_files
     
     # 第一层：遍历FOLDER下的所有项目（作为区域名）
-    for item in os.listdir(folder_path):
+    for item in sorted(os.listdir(folder_path)):
         region_path = os.path.join(folder_path, item)
         if os.path.isdir(region_path): 
             region_name = item  # 第一层子目录作为区域名
