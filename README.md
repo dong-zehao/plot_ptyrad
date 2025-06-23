@@ -9,10 +9,14 @@
 - MAT文件自动导出
 
 ## 安装
-
+将 plot_ptyrad 安装在`/path/plot_ptyrad/`路径的步骤如下：
 ```bash
 conda activate ptyrad
-cd /path/to/plot_ptyrad
+
+cd /path/
+git clone https://github.com/dong-zehao/plot_ptyrad.git
+
+cd ./plot_ptyrad
 pip install -e .
 ```
 
