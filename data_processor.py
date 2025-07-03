@@ -71,6 +71,123 @@ class DataProcessor:
             return None, None
     
     @staticmethod
+    def calculate_real_space_extent(data_shape, probe_dx):
+        """计算实空间的绝对坐标范围"""
+        if probe_dx is not None:
+            # 将probe_dx从埃转换为纳米
+            pixel_size_nm = probe_dx / 10.0
+            
+            ny, nx = data_shape
+            x_max = (nx - 1) * pixel_size_nm / 2.0
+            y_max = (ny - 1) * pixel_size_nm / 2.0
+            
+            # extent格式: [x_min, x_max, y_max, y_min] (注意y轴翻转)
+            extent = [-x_max, x_max, y_max, -y_max]
+            return extent, 'nm'
+        else:
+            # 如果没有probe_dx信息，使用像素单位
+            ny, nx = data_shape
+            extent = [0, nx, ny, 0]
+            return extent, 'pixels'
+    
+    @staticmethod
+    def apply_gaussian_window(data):
+        """为FFT应用高斯窗口以减少周期性边界伪影"""
+        ny, nx = data.shape
+        
+        # 创建2D高斯窗口
+        y_center, x_center = ny // 2, nx // 2
+        y, x = np.ogrid[:ny, :nx]
+        
+        # 设置高斯窗口的标准差为图像尺寸的1/10，这样在边缘处值接近0
+        sigma_y = ny / 10.0
+        sigma_x = nx / 10.0
+        
+        # 计算高斯窗口
+        gaussian_window = np.exp(-((x - x_center)**2 / (2 * sigma_x**2) + 
+                                 (y - y_center)**2 / (2 * sigma_y**2)))
+        
+        # 应用窗口
+        windowed_data = data * gaussian_window
+        
+        return windowed_data
+    
+    @staticmethod
+    def calculate_fft_data_and_extent(data, probe_dx, gamma=0.0):
+        """计算FFT数据和对应的k空间范围，支持gamma调整"""
+        # 应用高斯窗口以减少周期性边界伪影
+        windowed_data = DataProcessor.apply_gaussian_window(data)
+        
+        # 计算2D FFT并移到中心
+        fft_data = np.fft.fftshift(np.fft.fft2(windowed_data))
+        fft_magnitude = np.abs(fft_data)**2
+        
+        # 应用gamma调整：gamma校正是将图像强度进行幂次变换
+        if gamma <= 0.01:
+            # 近似log scale
+            fft_display = np.log10(fft_magnitude + 1e-10)
+        elif abs(gamma - 1.0) < 0.01:
+            # gamma=1为线性显示
+            fft_display = fft_magnitude
+        else:
+            # gamma校正：先归一化到[0,1]，然后应用幂次变换
+            normalized_data = (fft_magnitude - fft_magnitude.min()) / (fft_magnitude.max() - fft_magnitude.min() + 1e-10)
+            fft_display = normalized_data ** gamma
+        
+        # 计算k空间范围
+        if probe_dx is not None:
+            # 将probe_dx从埃转换为纳米
+            pixel_size_nm = probe_dx / 10.0
+            
+            # 计算k空间范围 (单位: 1/nm)
+            ny, nx = data.shape
+            kx_max = 1.0 / (2.0 * pixel_size_nm)  # Nyquist频率
+            ky_max = 1.0 / (2.0 * pixel_size_nm)
+            
+            # 创建k空间坐标轴 (以1/nm为单位)
+            kx = np.linspace(-kx_max, kx_max, nx)
+            ky = np.linspace(-ky_max, ky_max, ny)
+            
+            # extent格式: [x_min, x_max, y_max, y_min] (注意y轴翻转)
+            extent = [kx[0], kx[-1], ky[-1], ky[0]]
+            
+            return fft_display, extent
+        else:
+            # 如果没有probe_dx信息，使用像素单位
+            ny, nx = data.shape
+            extent = [-nx//2, nx//2, ny//2, -ny//2]
+            return fft_display, extent
+    
+    @staticmethod
+    def get_labels_and_units(probe_dx, is_fft=False, gamma=0.0):
+        """获取图像的坐标轴标签和单位"""
+        if is_fft:
+            if probe_dx is not None:
+                xlabel = 'kx (1/nm)'
+                ylabel = 'ky (1/nm)'
+            else:
+                xlabel = 'kx (pixels)'
+                ylabel = 'ky (pixels)'
+            
+            # 根据gamma值调整colorbar标签
+            if gamma <= 0.01:
+                cbar_label = 'log10|FFT| (a.u.)'
+            elif gamma >= 0.99:
+                cbar_label = '|FFT| (a.u.)'
+            else:
+                cbar_label = f'Mixed FFT (γ={gamma:.2f})'
+        else:
+            if probe_dx is not None:
+                xlabel = 'X (nm)'
+                ylabel = 'Y (nm)'
+            else:
+                xlabel = 'X Pixel Coordinate'
+                ylabel = 'Y Pixel Coordinate'
+            cbar_label = 'Phase (radians)'
+        
+        return xlabel, ylabel, cbar_label
+    
+    @staticmethod
     def apply_transformations(data, rotation_angle, crop_x, crop_y):
         """应用旋转和裁剪变换"""
         # 应用旋转

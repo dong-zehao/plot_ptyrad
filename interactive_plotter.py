@@ -70,7 +70,7 @@ class InteractivePlotter:
         
         # 创建UI控件
         ui_components = UIComponents(self.fig, self.data.shape, self.saved_params, self.initial_rotation)
-        self.sliders, self.radio_cmap, self.buttons = ui_components.create_all_components()
+        self.sliders, self.gamma_slider, self.radio_cmap, self.radio_display_mode, self.buttons = ui_components.create_all_components()
         
         # 添加说明文字
         self._add_info_text()
@@ -123,7 +123,9 @@ class InteractivePlotter:
         """连接事件处理器"""
         for slider in self.sliders.values():
             slider.on_changed(self.update_display)
+        self.gamma_slider.on_changed(self.update_display)  # 新增
         self.radio_cmap.on_clicked(self.update_display)
+        self.radio_display_mode.on_clicked(self.update_display)  # 新增
         
         # 连接按钮事件
         self.buttons['save_image'].on_clicked(self.save_current_image)
@@ -139,6 +141,8 @@ class InteractivePlotter:
         rotation_angle = DataProcessor.normalize_angle(self.sliders['rotation'].val)
         crop_x = int(self.sliders['crop_x'].val)
         crop_y = int(self.sliders['crop_y'].val)
+        display_mode = self.radio_display_mode.value_selected
+        gamma = self.gamma_slider.val  # 新增
         
         # 更新旋转滑块（如果角度被规范化）
         if abs(rotation_angle - self.sliders['rotation'].val) > 0.1:
@@ -149,8 +153,19 @@ class InteractivePlotter:
         current_data = self._process_layer_data(start_layer, layer_count)
         current_data = DataProcessor.apply_transformations(current_data, rotation_angle, crop_x, crop_y)
         
+        # 根据显示模式处理数据
+        if display_mode == 'fft':
+            display_data, extent = DataProcessor.calculate_fft_data_and_extent(current_data, self.probe_dx, gamma)
+        else:
+            display_data = current_data
+            extent, _ = DataProcessor.calculate_real_space_extent(current_data.shape, self.probe_dx)
+        
+        xlabel, ylabel, cbar_label = DataProcessor.get_labels_and_units(
+            self.probe_dx, is_fft=(display_mode == 'fft'), gamma=gamma)
+        
         # 更新图像显示
-        self._update_image_display(current_data, start_layer, layer_count, rotation_angle, crop_x, crop_y)
+        self._update_image_display(display_data, start_layer, layer_count, rotation_angle, 
+                                 crop_x, crop_y, display_mode, extent, xlabel, ylabel, cbar_label, gamma)
     
     def _process_layer_data(self, start_layer, layer_count):
         """处理层数据"""
@@ -166,30 +181,44 @@ class InteractivePlotter:
         else:
             return self.data[:, :, start_layer:end_layer+1].sum(axis=2)
     
-    def _update_image_display(self, current_data, start_layer, layer_count, rotation_angle, crop_x, crop_y):
+    def _update_image_display(self, display_data, start_layer, layer_count, rotation_angle, 
+                            crop_x, crop_y, display_mode, extent, xlabel, ylabel, cbar_label, gamma):
         """更新图像显示"""
         # 更新图像
-        self.im.set_data(current_data)
+        self.im.set_data(display_data)
         self.im.set_cmap(self.radio_cmap.value_selected)
-        self.im.set_extent([0, current_data.shape[1], current_data.shape[0], 0])
-        self.ax.set_xlim(0, current_data.shape[1])
-        self.ax.set_ylim(current_data.shape[0], 0)
+        self.im.set_extent(extent)
+        
+        # 设置坐标轴范围和标签
+        self.ax.set_xlim(extent[0], extent[1])
+        self.ax.set_ylim(extent[3], extent[2])
+        self.ax.set_xlabel(xlabel, fontsize=14, color='#34495e')
+        self.ax.set_ylabel(ylabel, fontsize=14, color='#34495e')
         self.ax.set_aspect('equal', adjustable='box')
         
         # 设置色阶
-        data_min, data_max = current_data.min(), current_data.max()
+        data_min, data_max = display_data.min(), display_data.max()
         self.im.set_clim(data_min, data_max)
         self.cb.update_normal(self.im)
+        self.cb.set_label(cbar_label, fontsize=14, labelpad=12, color='#34495e')
         
         # 更新标题
         end_layer = min(start_layer + layer_count - 1, self.data.shape[2] - 1)
         layer_info = f" - Layer {start_layer}" if layer_count == 1 else f" - Layers {start_layer}-{end_layer} ({layer_count} layers summed)"
         rotation_info = f", Rotation: {rotation_angle:.1f}°" if abs(rotation_angle) > 0.1 else ""
         crop_info = f", Crop: {crop_x}×{crop_y}" if crop_x > 0 or crop_y > 0 else ""
-        range_info = f" [Phase: {data_min:.3f} to {data_max:.3f} rad]"
         
-        self.ax.set_title(f"Object Phase{layer_info}{rotation_info}{crop_info}{range_info}", 
-                     fontsize=12, color='#2c3e50')
+        if display_mode == 'fft':
+            mode_info = f" - FFT (γ={gamma:.2f})"
+            title_prefix = "Object Phase FFT"
+        else:
+            mode_info = ""
+            title_prefix = "Object Phase"
+        
+        range_info = f" [Range: {data_min:.3f} to {data_max:.3f}]"
+        
+        self.ax.set_title(f"{title_prefix}{layer_info}{rotation_info}{crop_info}{mode_info}{range_info}", 
+                    fontsize=12, color='#2c3e50')
         
         self.fig.canvas.draw()
     
@@ -201,7 +230,9 @@ class InteractivePlotter:
             'rotation_angle': self.sliders['rotation'].val,
             'crop_x': int(self.sliders['crop_x'].val),
             'crop_y': int(self.sliders['crop_y'].val),
-            'colormap': self.radio_cmap.value_selected
+            'colormap': self.radio_cmap.value_selected,
+            'display_mode': self.radio_display_mode.value_selected,
+            'fft_gamma': self.gamma_slider.val  # 新增
         }
     
     def save_current_image(self, event):
@@ -218,33 +249,49 @@ class InteractivePlotter:
             current_data, DataProcessor.normalize_angle(params['rotation_angle']),
             params['crop_x'], params['crop_y'])
         
+        # 根据显示模式处理数据
+        if params['display_mode'] == 'fft':
+            display_data, extent = DataProcessor.calculate_fft_data_and_extent(
+                current_data, self.probe_dx, params['fft_gamma'])
+            mode_suffix = f"_FFT_gamma{params['fft_gamma']:.2f}"
+        else:
+            display_data = current_data
+            extent, _ = DataProcessor.calculate_real_space_extent(current_data.shape, self.probe_dx)
+            mode_suffix = ""
+        
+        xlabel, ylabel, cbar_label = DataProcessor.get_labels_and_units(
+            self.probe_dx, is_fft=(params['display_mode'] == 'fft'), gamma=params['fft_gamma'])
+        
         # 生成文件名并保存
-        self._save_image_file(current_data, params, start_layer, end_layer, layer_count)
+        self._save_image_file(display_data, params, start_layer, end_layer, layer_count, 
+                            extent, xlabel, ylabel, cbar_label, mode_suffix)
     
-    def _save_image_file(self, current_data, params, start_layer, end_layer, layer_count):
+    def _save_image_file(self, display_data, params, start_layer, end_layer, layer_count, 
+                       extent, xlabel, ylabel, cbar_label, mode_suffix=""):
         """保存图像文件"""
-        fov_info = DataProcessor.calculate_field_of_view(current_data.shape, self.probe_dx)
+        fov_info = DataProcessor.calculate_field_of_view(display_data.shape, self.probe_dx)
         layer_info = f"Layer_{start_layer}" if layer_count == 1 else f"Layers_{start_layer}-{end_layer}"
         rotation_angle = DataProcessor.normalize_angle(params['rotation_angle'])
         rotation_info = f"_Rotation_{rotation_angle:.1f}deg" if abs(rotation_angle) > 0.1 else ""
         
-        filename = f"objp_{layer_info}{rotation_info}{fov_info}.png"
+        filename = f"objp_{layer_info}{rotation_info}{fov_info}{mode_suffix}.png"
         filepath = os.path.join(self.save_dir, filename)
         
         # 保存图像
         save_fig, save_ax = plt.subplots(figsize=(10, 8))
         save_fig.patch.set_facecolor('white')
         
-        save_im = save_ax.imshow(current_data, cmap=params['colormap'], interpolation='bilinear')
-        save_ax.set_xticks([])
-        save_ax.set_yticks([])
+        save_im = save_ax.imshow(display_data, cmap=params['colormap'], 
+                               interpolation='bilinear', extent=extent)
+        save_ax.set_xlabel(xlabel, fontsize=14, color='#34495e')
+        save_ax.set_ylabel(ylabel, fontsize=14, color='#34495e')
         save_ax.set_aspect('equal', adjustable='box')
         
-        data_min, data_max = current_data.min(), current_data.max()
+        data_min, data_max = display_data.min(), display_data.max()
         save_im.set_clim(data_min, data_max)
         
         save_cb = plt.colorbar(save_im, ax=save_ax, pad=0.02)
-        save_cb.set_label('Phase (rad)', fontsize=14, labelpad=12, color='#34495e')
+        save_cb.set_label(cbar_label, fontsize=14, labelpad=12, color='#34495e')
         save_fig.savefig(filepath, dpi=600, bbox_inches='tight', facecolor='white')
         plt.close(save_fig)
         

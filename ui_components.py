@@ -4,7 +4,7 @@ UI组件类 - 管理界面元素的创建和交互
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, RadioButtons, Button
-from config import UI_LAYOUT, COLORMAP_OPTIONS
+from config import UI_LAYOUT, COLORMAP_OPTIONS, DISPLAY_MODE_OPTIONS
 
 class UIComponents:
     """UI组件管理器"""
@@ -16,15 +16,19 @@ class UIComponents:
         self.initial_rotation = initial_rotation
         
         self.sliders = {}
+        self.gamma_slider = None  # 新增：gamma滑块
         self.radio_cmap = None
+        self.radio_display_mode = None  # 新增：显示模式选择器
         self.buttons = {}
         
     def create_all_components(self):
         """创建所有UI组件"""
         self.sliders = self._create_sliders()
+        self.gamma_slider = self._create_gamma_slider()  # 新增
         self.radio_cmap = self._create_colormap_selector()
+        self.radio_display_mode = self._create_display_mode_selector()  # 新增
         self.buttons = self._create_control_buttons()
-        return self.sliders, self.radio_cmap, self.buttons
+        return self.sliders, self.gamma_slider, self.radio_cmap, self.radio_display_mode, self.buttons  # 修改返回值
     
     def _create_sliders(self):
         """创建控制滑块"""
@@ -95,6 +99,51 @@ class UIComponents:
         radio_cmap.set_active(list(COLORMAP_OPTIONS).index(initial_colormap))
         
         return radio_cmap
+    
+    def _create_display_mode_selector(self):
+        """创建显示模式选择器"""
+        ax_display = plt.axes(UI_LAYOUT['display_mode_panel'])
+        ax_display.set_facecolor('#f8f9fa')
+        ax_display.set_title('Display Mode', fontsize=15, fontweight='bold', 
+                            pad=5, color='#2c3e50')
+        
+        radio_display = RadioButtons(ax_display, DISPLAY_MODE_OPTIONS,
+                                   activecolor='#e74c3c', 
+                                   radio_props={'s': 40, 'edgecolor': "#E74C3C", 'linewidth': 1.5})
+        
+        # 美化选择器
+        for label in radio_display.labels:
+            label.set_fontsize(14)
+            label.set_color('#2c3e50')
+            label.set_fontweight('normal')
+        
+        for spine in ax_display.spines.values():
+            spine.set_color('#bdc3c7')
+            spine.set_linewidth(1.5)
+        
+        # 设置初始值
+        initial_display_mode = self.saved_params.get('display_mode', 'original')
+        radio_display.set_active(list(DISPLAY_MODE_OPTIONS).index(initial_display_mode))
+        
+        return radio_display
+    
+    def _create_gamma_slider(self):
+        """创建gamma调整滑块"""
+        ax_gamma = plt.axes(UI_LAYOUT['gamma_slider_panel'])
+        ax_gamma.set_facecolor('#ecf0f1')
+        
+        initial_gamma = self.saved_params.get('fft_gamma', 0.0)
+        gamma_slider = Slider(ax_gamma, 'FFT γ', 0.0, 1.0, 
+                            valinit=initial_gamma, valfmt='%.2f',
+                            facecolor='#e74c3c', edgecolor='#c0392b', alpha=0.8)
+        
+        self._style_slider(gamma_slider)
+        
+        # 添加标题
+        plt.figtext(0.87, 0.35, 'FFT Contrast', 
+                   fontsize=10, fontweight='bold', ha='center', color='#34495e')
+        
+        return gamma_slider
     
     def _create_control_buttons(self):
         """创建控制按钮"""
