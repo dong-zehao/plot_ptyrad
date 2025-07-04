@@ -96,11 +96,12 @@ class InteractivePlotter:
         self.im = self.ax.imshow(initial_data, cmap='viridis', interpolation='bilinear')
         self.ax.set_title("Object Phase (objp) Visualization", 
                     fontsize=20, fontweight='bold', pad=25, color='#2c3e50')
-        self.ax.set_xlabel('X Pixel Coordinate', fontsize=14, color='#34495e')
-        self.ax.set_ylabel('Y Pixel Coordinate', fontsize=14, color='#34495e')
+        
+        # 去掉坐标轴标签和刻度
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
         
         # 美化坐标轴
-        self.ax.tick_params(colors='#34495e', labelsize=12)
         for spine in self.ax.spines.values():
             spine.set_color('#bdc3c7')
             spine.set_linewidth(1)
@@ -142,7 +143,7 @@ class InteractivePlotter:
         crop_x = int(self.sliders['crop_x'].val)
         crop_y = int(self.sliders['crop_y'].val)
         display_mode = self.radio_display_mode.value_selected
-        gamma = self.gamma_slider.val  # 新增
+        gamma = self.gamma_slider.val
         
         # 更新旋转滑块（如果角度被规范化）
         if abs(rotation_angle - self.sliders['rotation'].val) > 0.1:
@@ -160,13 +161,13 @@ class InteractivePlotter:
             display_data = current_data
             extent, _ = DataProcessor.calculate_real_space_extent(current_data.shape, self.probe_dx)
         
-        xlabel, ylabel, cbar_label = DataProcessor.get_labels_and_units(
+        cbar_label = DataProcessor.get_labels_and_units(
             self.probe_dx, is_fft=(display_mode == 'fft'), gamma=gamma)
         
         # 更新图像显示
         self._update_image_display(display_data, start_layer, layer_count, rotation_angle, 
-                                 crop_x, crop_y, display_mode, extent, xlabel, ylabel, cbar_label, gamma)
-    
+                                 crop_x, crop_y, display_mode, extent, cbar_label, gamma)
+
     def _process_layer_data(self, start_layer, layer_count):
         """处理层数据"""
         end_layer = min(start_layer + layer_count - 1, self.data.shape[2] - 1)
@@ -182,7 +183,7 @@ class InteractivePlotter:
             return self.data[:, :, start_layer:end_layer+1].sum(axis=2)
     
     def _update_image_display(self, display_data, start_layer, layer_count, rotation_angle, 
-                            crop_x, crop_y, display_mode, extent, xlabel, ylabel, cbar_label, gamma):
+                            crop_x, crop_y, display_mode, extent, cbar_label, gamma):
         """更新图像显示"""
         # 更新图像
         self.im.set_data(display_data)
@@ -191,9 +192,9 @@ class InteractivePlotter:
         
         # 设置坐标轴范围和标签
         self.ax.set_xlim(extent[0], extent[1])
-        self.ax.set_ylim(extent[3], extent[2])
-        self.ax.set_xlabel(xlabel, fontsize=14, color='#34495e')
-        self.ax.set_ylabel(ylabel, fontsize=14, color='#34495e')
+        self.ax.set_ylim(extent[2], extent[3])
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
         self.ax.set_aspect('equal', adjustable='box')
         
         # 设置色阶
@@ -259,15 +260,15 @@ class InteractivePlotter:
             extent, _ = DataProcessor.calculate_real_space_extent(current_data.shape, self.probe_dx)
             mode_suffix = ""
         
-        xlabel, ylabel, cbar_label = DataProcessor.get_labels_and_units(
+        cbar_label = DataProcessor.get_labels_and_units(
             self.probe_dx, is_fft=(params['display_mode'] == 'fft'), gamma=params['fft_gamma'])
         
         # 生成文件名并保存
         self._save_image_file(display_data, params, start_layer, end_layer, layer_count, 
-                            extent, xlabel, ylabel, cbar_label, mode_suffix)
+                            extent, cbar_label, mode_suffix)
     
     def _save_image_file(self, display_data, params, start_layer, end_layer, layer_count, 
-                       extent, xlabel, ylabel, cbar_label, mode_suffix=""):
+                       extent, cbar_label, mode_suffix=""):
         """保存图像文件"""
         fov_info = DataProcessor.calculate_field_of_view(display_data.shape, self.probe_dx)
         layer_info = f"Layer_{start_layer}" if layer_count == 1 else f"Layers_{start_layer}-{end_layer}"
@@ -283,9 +284,15 @@ class InteractivePlotter:
         
         save_im = save_ax.imshow(display_data, cmap=params['colormap'], 
                                interpolation='bilinear', extent=extent)
-        save_ax.set_xlabel(xlabel, fontsize=14, color='#34495e')
-        save_ax.set_ylabel(ylabel, fontsize=14, color='#34495e')
         save_ax.set_aspect('equal', adjustable='box')
+        
+        # 设置坐标轴范围和标签
+        save_ax.set_xlim(extent[0], extent[1])
+        save_ax.set_ylim(extent[2], extent[3])
+        save_ax.set_xticks([])
+        save_ax.set_yticks([])
+        save_ax.set_xlabel('')
+        save_ax.set_ylabel('')
         
         data_min, data_max = display_data.min(), display_data.max()
         save_im.set_clim(data_min, data_max)

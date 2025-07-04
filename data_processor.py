@@ -99,9 +99,9 @@ class DataProcessor:
         y_center, x_center = ny // 2, nx // 2
         y, x = np.ogrid[:ny, :nx]
         
-        # 设置高斯窗口的标准差为图像尺寸的1/10，这样在边缘处值接近0
-        sigma_y = ny / 10.0
-        sigma_x = nx / 10.0
+        # 设置高斯窗口的标准差为图像尺寸的1/6，这样在边缘处值接近0
+        sigma_y = ny / 6.0
+        sigma_x = nx / 6.0
         
         # 计算高斯窗口
         gaussian_window = np.exp(-((x - x_center)**2 / (2 * sigma_x**2) + 
@@ -160,15 +160,8 @@ class DataProcessor:
     
     @staticmethod
     def get_labels_and_units(probe_dx, is_fft=False, gamma=0.0):
-        """获取图像的坐标轴标签和单位"""
+        """获取图像的colorbar标签"""
         if is_fft:
-            if probe_dx is not None:
-                xlabel = 'kx (1/nm)'
-                ylabel = 'ky (1/nm)'
-            else:
-                xlabel = 'kx (pixels)'
-                ylabel = 'ky (pixels)'
-            
             # 根据gamma值调整colorbar标签
             if gamma <= 0.01:
                 cbar_label = 'log10|FFT| (a.u.)'
@@ -177,15 +170,9 @@ class DataProcessor:
             else:
                 cbar_label = f'Mixed FFT (γ={gamma:.2f})'
         else:
-            if probe_dx is not None:
-                xlabel = 'X (nm)'
-                ylabel = 'Y (nm)'
-            else:
-                xlabel = 'X Pixel Coordinate'
-                ylabel = 'Y Pixel Coordinate'
             cbar_label = 'Phase (radians)'
         
-        return xlabel, ylabel, cbar_label
+        return cbar_label
     
     @staticmethod
     def apply_transformations(data, rotation_angle, crop_x, crop_y):

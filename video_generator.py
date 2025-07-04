@@ -36,7 +36,7 @@ class VideoGenerator:
             extent, _ = DataProcessor.calculate_real_space_extent(current_data.shape, probe_dx)
             title_prefix = ""
         
-        xlabel, ylabel, cbar_label = DataProcessor.get_labels_and_units(
+        cbar_label = DataProcessor.get_labels_and_units(
             probe_dx, is_fft=(params.get('display_mode') == 'fft'), gamma=params.get('fft_gamma', 0.0))
         
         # 计算深度信息
@@ -54,15 +54,8 @@ class VideoGenerator:
         frame_ax.set_title(f"{title_prefix}Layer {layer_idx}{depth_info}", 
                          fontsize=16, fontweight='bold', color='#2c3e50')
         
-        # 设置样式和标签
-        if params.get('display_mode') == 'fft' or probe_dx is not None:
-            frame_ax.set_xlabel(xlabel, fontsize=12, color='#2c3e50')
-            frame_ax.set_ylabel(ylabel, fontsize=12, color='#2c3e50')
-            frame_ax.tick_params(colors='#2c3e50', labelsize=10)
-        else:
-            frame_ax.set_xticks([])
-            frame_ax.set_yticks([])
-        
+        frame_ax.set_xticks([])
+        frame_ax.set_yticks([])
         frame_ax.set_aspect('equal', adjustable='box')
         
         # 设置色阶范围
@@ -87,8 +80,9 @@ class VideoGenerator:
         """保存视频文件"""
         # 获取参数
         rotation_angle = DataProcessor.normalize_angle(params['rotation_angle'])
+        probe_dx, _ = DataProcessor.load_yml_params(pt_file_dir)
         crop_datashape = (data.shape[0] - params['crop_x']*2, data.shape[1] - params['crop_y']*2)
-        fov_info = DataProcessor.calculate_field_of_view(crop_datashape, DataProcessor.load_yml_params(pt_file_dir)[0])
+        fov_info = DataProcessor.calculate_field_of_view(crop_datashape, probe_dx)
         rotation_info = f"_Rotation_{rotation_angle:.1f}deg" if abs(rotation_angle) > 0.1 else ""
         
         if params.get('display_mode') == 'fft':
@@ -101,8 +95,6 @@ class VideoGenerator:
         slice_thickness = None
         if optimizable_tensors and 'slice_thickness' in optimizable_tensors:
             slice_thickness = optimizable_tensors['slice_thickness'].detach().cpu().numpy().item()
-        
-        probe_dx, _ = DataProcessor.load_yml_params(pt_file_dir)
            
         video_filename = f"objp_layers_video{rotation_info}{fov_info}{mode_suffix}.mp4"
         video_filepath = os.path.join(self.save_dir, video_filename)
