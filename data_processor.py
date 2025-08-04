@@ -15,11 +15,6 @@ class DataProcessor:
     """数据处理器"""
     
     @staticmethod
-    def get_device():
-        """获取可用的计算设备"""
-        return 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    
-    @staticmethod
     def normalize_angle(angle):
         """将角度规范化到±180°范围内"""
         while angle > 180:
@@ -33,9 +28,7 @@ class DataProcessor:
         """加载.pt文件并返回数据"""
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"文件不存在: {filepath}")
-        
-        device = DataProcessor.get_device()
-        data = torch.load(filepath, weights_only=False, map_location=device)
+        data = torch.load(filepath, weights_only=False, map_location='cpu')
         return data
     
     @staticmethod
