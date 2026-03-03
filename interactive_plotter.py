@@ -311,10 +311,10 @@ class InteractivePlotter:
         ParameterManager.save_plot_params(self.save_dir, current_params)
         
         if not self.all_pt_files:
-            print("未找到任何pt文件进行批量处理")
+            print("未找到任何模型文件进行批量处理")
             return
         
-        print(f"找到 {len(self.all_pt_files)} 个pt文件需要处理")
+        print(f"找到 {len(self.all_pt_files)} 个模型文件需要处理")
         
         # 处理每个文件
         for pt_file_path, region_number in self.all_pt_files:
@@ -335,8 +335,8 @@ class InteractivePlotter:
             
             region_video_generator = VideoGenerator(region_save_dir)
             
-            pt_data = DataProcessor.load_pt_file(pt_file_path)
-            file_optimizable_tensors = pt_data.get('optimizable_tensors', {})
+            model_data = DataProcessor.load_model_file(pt_file_path)
+            file_optimizable_tensors = DataProcessor.extract_optimizable_tensors(model_data)
             
             # 处理数据并生成视频
             file_tensor_np = file_optimizable_tensors['objp'].detach().cpu().numpy()

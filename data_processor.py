@@ -7,6 +7,7 @@ import json
 import torch
 import numpy as np
 import yaml
+import h5py
 import scipy.io as sio
 from scipy.ndimage import rotate
 from config import DEFAULT_PARAMS
@@ -30,14 +31,83 @@ class DataProcessor:
             raise FileNotFoundError(f"文件不存在: {filepath}")
         data = torch.load(filepath, weights_only=False, map_location='cpu')
         return data
+
+    @staticmethod
+    def _to_torch_tensor(value):
+        """将输入值转换为torch.Tensor（若可转换）"""
+        if isinstance(value, torch.Tensor):
+            return value
+
+        if isinstance(value, np.ndarray):
+            return torch.from_numpy(value)
+
+        if np.isscalar(value):
+            if isinstance(value, (bytes, str)):
+                return value
+            return torch.tensor(value)
+
+        return value
+
+    @staticmethod
+    def _to_numpy(value):
+        """将tensor/数组转换为numpy数组"""
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().numpy()
+        if isinstance(value, np.ndarray):
+            return value
+        return np.array(value)
+
+    @staticmethod
+    def load_hdf5_file(filepath):
+        """加载.hdf5文件并转换为与.pt一致的数据结构"""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"文件不存在: {filepath}")
+
+        data = {'optimizable_tensors': {}}
+
+        with h5py.File(filepath, 'r') as h5_file:
+            if 'optimizable_tensors' not in h5_file:
+                raise KeyError("在 .hdf5 文件中未找到 'optimizable_tensors' 组")
+
+            opt_group = h5_file['optimizable_tensors']
+            for key, value in opt_group.items():
+                if isinstance(value, h5py.Dataset):
+                    dataset_value = value[()]
+                    data['optimizable_tensors'][key] = DataProcessor._to_torch_tensor(dataset_value)
+
+            for key in ('slice_thickness', 'obj_tilts'):
+                if key in h5_file and key not in data['optimizable_tensors']:
+                    root_value = h5_file[key]
+                    if isinstance(root_value, h5py.Dataset):
+                        data['optimizable_tensors'][key] = DataProcessor._to_torch_tensor(root_value[()])
+
+        return data
+
+    @staticmethod
+    def load_model_file(filepath):
+        """统一加载模型文件，支持.pt和.hdf5"""
+        _, ext = os.path.splitext(filepath.lower())
+        if ext == '.pt':
+            return DataProcessor.load_pt_file(filepath)
+        if ext in ('.hdf5', '.h5'):
+            return DataProcessor.load_hdf5_file(filepath)
+        raise ValueError(f"不支持的文件格式: {ext}，仅支持 .pt/.hdf5/.h5")
     
     @staticmethod
     def extract_optimizable_tensors(data):
         """从加载的数据中提取optimizable_tensors"""
         if 'optimizable_tensors' not in data:
-            raise KeyError("在 .pt 文件中未找到 'optimizable_tensors' 键")
+            raise KeyError("未找到 'optimizable_tensors' 键")
         
         optimizable_tensors = data['optimizable_tensors']
+
+        if 'objp' in optimizable_tensors:
+            optimizable_tensors['objp'] = DataProcessor._to_torch_tensor(optimizable_tensors['objp'])
+
+        for key in ('slice_thickness', 'obj_tilts'):
+            if key in optimizable_tensors:
+                optimizable_tensors[key] = DataProcessor._to_torch_tensor(optimizable_tensors[key])
+
         return optimizable_tensors
     
     @staticmethod
@@ -246,13 +316,10 @@ class ParameterManager:
         try:
             mat_data = {}
             for name, tensor in optimizable_tensors.items():
-                if isinstance(tensor, torch.Tensor):
-                    numpy_array = tensor.detach().cpu().numpy()
-                    mat_data[name] = numpy_array
-                else:
-                    mat_data[name] = tensor
+                mat_data[name] = DataProcessor._to_numpy(tensor)
             
-            mat_filename = pt_filename.replace('.pt', '.mat')
+            base_name = os.path.splitext(pt_filename)[0] if pt_filename else 'model'
+            mat_filename = f"{base_name}.mat"
             mat_filepath = os.path.join(save_dir, mat_filename)
             sio.savemat(mat_filepath, mat_data, format='5', do_compression=True)
             print(f"MAT文件已保存到: {mat_filepath}")

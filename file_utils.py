@@ -22,8 +22,8 @@ def check_if_processed(save_dir, check_type='general', force=False):
         return len(image_files) > 0
 
 
-def find_pt_files(folder_path, filename_pattern):
-    """查找匹配模式的pt文件"""
+def find_model_files(folder_path, filename_pattern):
+    """查找匹配文件名的模型文件（支持.pt/.hdf5/.h5）"""
     found_files = []
     
     if not os.path.exists(folder_path):
@@ -36,7 +36,7 @@ def find_pt_files(folder_path, filename_pattern):
         if os.path.isdir(region_path): 
             region_name = item  # 第一层子目录作为区域名
             
-            # 递归搜索该区域目录下的所有.pt文件
+            # 递归搜索该区域目录下的所有模型文件
             for root, dirs, files in os.walk(region_path):
                 for file in files:
                     if file == filename_pattern:  # 精确匹配文件名
@@ -45,3 +45,8 @@ def find_pt_files(folder_path, filename_pattern):
                         print(f"找到文件: {pt_file_path} (区域: {region_name})")
     
     return found_files
+
+
+def find_pt_files(folder_path, filename_pattern):
+    """向后兼容：保留原函数名"""
+    return find_model_files(folder_path, filename_pattern)

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from config import PROCESSING_STATE, MATPLOTLIB_CONFIG
 from data_processor import DataProcessor, ParameterManager
 from interactive_plotter import InteractivePlotter
-from file_utils import check_if_processed, find_pt_files
+from file_utils import check_if_processed, find_model_files
 
 
 def plot_tensor_overview(optimizable_tensors, pt_file_dir, save_dir, all_pt_files=None, pt_filename=None):
@@ -41,7 +41,7 @@ def plot_tensor_overview(optimizable_tensors, pt_file_dir, save_dir, all_pt_file
 
 
 def process_single_file(pt_file_path, region_number, all_data_folder_path, all_pt_files=None, force=False):
-    """处理单个pt文件"""
+    """处理单个模型文件（.pt/.hdf5）"""
     try:
         save_dir = os.path.join(all_data_folder_path, 'Data_Saved', region_number)
         os.makedirs(save_dir, exist_ok=True)
@@ -52,7 +52,7 @@ def process_single_file(pt_file_path, region_number, all_data_folder_path, all_p
         
         print(f"\n处理区域 {region_number}: {pt_file_path}")
         
-        data = DataProcessor.load_pt_file(pt_file_path)
+        data = DataProcessor.load_model_file(pt_file_path)
         optimizable_tensors = DataProcessor.extract_optimizable_tensors(data)
         pt_file_dir = os.path.dirname(os.path.abspath(pt_file_path))
         
@@ -73,3 +73,8 @@ def process_single_file(pt_file_path, region_number, all_data_folder_path, all_p
     except Exception as e:
         print(f"处理区域 {region_number} 时出错: {e}")
         return False
+
+
+def find_pt_files(folder_path, filename_pattern):
+    """向后兼容：保留旧导入名"""
+    return find_model_files(folder_path, filename_pattern)

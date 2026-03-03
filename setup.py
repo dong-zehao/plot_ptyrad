@@ -37,6 +37,7 @@ setup(
     ],
     install_requires=[
         'torch>=1.9.0',
+        'h5py>=3.8.0',
         'numpy>=1.21.0',
         'matplotlib>=3.5.0',
         'scipy>=1.7.0',
