@@ -238,22 +238,51 @@ class DataProcessor:
         return cbar_label
     
     @staticmethod
-    def apply_transformations(data, rotation_angle, crop_x, crop_y):
-        """应用旋转和裁剪变换"""
+    def apply_transformations(data, rotation_angle, crop_x, crop_y,
+                              crop_center_x=0, crop_center_y=0):
+        """应用旋转和裁剪变换，支持crop中心偏移"""
         # 应用旋转
         if abs(rotation_angle) > 0.1:
             data = rotate(data, rotation_angle, reshape=False, mode='constant', cval=0)
-        
-        # 应用裁剪
+
+        # 应用裁剪（crop_center_x/y控制裁剪窗口的中心偏移）
         if crop_x > 0 or crop_y > 0:
             h, w = data.shape
-            x_start = max(0, crop_x)
-            x_end = min(h, h - crop_x)
-            y_start = max(0, crop_y)
-            y_end = min(w, w - crop_y)
+            x_start = max(0, crop_x - crop_center_x)
+            x_end = min(h, h - crop_x - crop_center_x)
+            y_start = max(0, crop_y - crop_center_y)
+            y_end = min(w, w - crop_y - crop_center_y)
             data = data[x_start:x_end, y_start:y_end]
-        
+
         return data
+
+    @staticmethod
+    def render_view(raw_2d_data, params, probe_dx=None):
+        """应用变换并计算显示数据、extent和colorbar标签。
+
+        Returns:
+            tuple: (display_data, extent, cbar_label)
+        """
+        rotation_angle = DataProcessor.normalize_angle(params['rotation_angle'])
+        transformed = DataProcessor.apply_transformations(
+            raw_2d_data, rotation_angle,
+            params['crop_x'], params['crop_y'],
+            params.get('crop_center_x', 0), params.get('crop_center_y', 0))
+
+        display_mode = params.get('display_mode', 'original')
+        gamma = params.get('fft_gamma', 0.0)
+
+        if display_mode == 'fft':
+            display_data, extent = DataProcessor.calculate_fft_data_and_extent(
+                transformed, probe_dx, gamma)
+        else:
+            display_data = transformed
+            extent, _ = DataProcessor.calculate_real_space_extent(transformed.shape, probe_dx)
+
+        cbar_label = DataProcessor.get_labels_and_units(
+            probe_dx, is_fft=(display_mode == 'fft'), gamma=gamma)
+
+        return display_data, extent, cbar_label
     
     @staticmethod
     def calculate_field_of_view(data_shape, probe_dx):

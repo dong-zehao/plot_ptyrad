@@ -208,3 +208,6 @@ Data_Saved/
 # Backup files
 *.bak
 *.backup
+
+# claude files
+.claude
