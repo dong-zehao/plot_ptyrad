@@ -31,6 +31,7 @@ setup(
         'ui_components',
         'data_processor',
         'interactive_plotter',
+        'qt_interactive_plotter',
         'video_generator',
         'file_utils',
         'cli'
@@ -45,6 +46,8 @@ setup(
         'imageio>=2.19.0',
         'imageio-ffmpeg>=0.4.7',  # 添加 ffmpeg 支持
         'tqdm>=4.62.0',
+        'PySide6>=6.5.0',
+        'pyqtgraph>=0.13.0',
     ],
     entry_points={
         'console_scripts': [

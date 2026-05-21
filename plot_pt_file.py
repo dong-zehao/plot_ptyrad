@@ -68,6 +68,23 @@ def process_single_file(pt_file_path, region_number, all_data_folder_path, all_p
         return False
 
 
+def process_qt_files(all_pt_files, all_data_folder_path, force=False, preview_max_size=1024):
+    """Run the Qt backend once for all detected files."""
+    try:
+        from qt_interactive_plotter import run_qt_session
+    except ImportError as e:
+        print(f"Qt backend requires PySide6 and pyqtgraph: {e}")
+        print("Install dependencies with: pip install PySide6 pyqtgraph")
+        return False
+
+    return run_qt_session(
+        all_pt_files,
+        all_data_folder_path,
+        force=force,
+        preview_max_size=preview_max_size
+    )
+
+
 def find_pt_files(folder_path, filename_pattern):
     """向后兼容：保留旧导入名"""
     return find_model_files(folder_path, filename_pattern)

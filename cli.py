@@ -52,6 +52,20 @@ plot_ptyrad 用于批量解析 ptyrad 重构的 .pt/.hdf5 文件并生成交互�
         help='强制重新处理所有数据，不跳过已处理的文件'
     )
     
+    parser.add_argument(
+        '--gui-backend',
+        choices=('matplotlib', 'qt'),
+        default='matplotlib',
+        help='GUI backend to use. Defaults to matplotlib during Qt migration.'
+    )
+
+    parser.add_argument(
+        '--preview-max-size',
+        type=int,
+        default=1024,
+        help='Maximum preview edge size for the Qt backend only.'
+    )
+
     return parser
 
 def validate_args(args):
@@ -84,7 +98,8 @@ def main():
     try:
         from plot_pt_file import (
             find_pt_files, 
-            process_single_file, 
+            process_single_file,
+            process_qt_files,
             DataProcessor,
             PROCESSING_STATE
         )
@@ -107,6 +122,15 @@ def main():
             print("强制重新处理模式：将重新处理所有数据文件")
         
         # 处理文件
+        if args.gui_backend == 'qt':
+            process_qt_files(
+                pt_files,
+                args.folder,
+                force=args.force,
+                preview_max_size=args.preview_max_size
+            )
+            return
+
         successful_count = 0
         
         for pt_file_path, region_number in pt_files:
