@@ -113,9 +113,9 @@ class DataProcessor:
     @staticmethod
     def load_yml_params(pt_file_dir):
         """从yml文件加载参数"""
-        yml_files = [f for f in os.listdir(pt_file_dir) if f.endswith('.yml')]
+        yml_files = [f for f in os.listdir(pt_file_dir) if f.endswith('.yaml')]
         if not yml_files:
-            print(f"警告: 在目录 {pt_file_dir} 中未找到.yml文件")
+            print(f"警告: 在目录 {pt_file_dir} 中未找到.yaml文件")
             return None, None
         
         yml_path = os.path.join(pt_file_dir, yml_files[0])
