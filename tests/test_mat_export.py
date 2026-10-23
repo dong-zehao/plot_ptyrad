@@ -72,12 +72,7 @@ def test_repeat_export_updates_even_with_existing_mat_and_video(model, tmp_path)
         assert result["object_3d"].shape == (8 - 2 * crop, 10, 3)
 
 
-def test_pt_and_legacy_imports(tmp_path):
-    from data_processor import DataProcessor as LegacyProcessor
-    from config import PROCESSING_STATE as legacy_state
-    from plot_ptyrad.config import PROCESSING_STATE
-    assert LegacyProcessor is DataProcessor
-    assert legacy_state is PROCESSING_STATE
+def test_pt_export(tmp_path):
     path = tmp_path / "model.pt"
     objp = torch.arange(120, dtype=torch.float32).reshape(1, 3, 5, 8)
     torch.save({"optimizable_tensors": {"objp": objp, "extra": torch.tensor([4, 5])}}, path)

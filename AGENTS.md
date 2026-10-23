@@ -3,7 +3,7 @@
 These guidelines describe how to work with the `plot_ptyrad` CLI and codebase.
 
 ## Project Structure & Module Organization
-- Implementation lives in the `plot_ptyrad/` package; root modules are compatibility shims. Project configuration lives in `pyproject.toml`. Key modules include `cli.py` (entry point), `plot_pt_file.py` (file discovery/processing), `data_processor.py`, `interactive_plotter.py`, `ui_components.py`, `video_generator.py`, `file_utils.py`, and `config.py`.
+- Implementation lives exclusively in the `plot_ptyrad/` package. Project configuration lives in `pyproject.toml`. Key modules include `cli.py` (entry point), `plot_pt_file.py` (file discovery/processing), `data_processor.py`, `interactive_plotter.py`, `ui_components.py`, `video_generator.py`, `file_utils.py`, and `config.py`.
 - Outputs are written under the user-specified parent folder as `Data_Saved/<region_name>/` (PNG/MP4/MAT artifacts).
 - Documentation and usage examples live in `README.md` (Chinese).
 
@@ -11,7 +11,7 @@ These guidelines describe how to work with the `plot_ptyrad` CLI and codebase.
 - `pip install -e .` installs the editable CLI entry point `plot_ptyrad`.
 - `plot_ptyrad --folder /path/to/parent_folder --file model_iter1000.pt` processes matching `.pt` files and writes results to `Data_Saved/`.
 - `plot_ptyrad --force ...` reprocesses data even if outputs already exist.
-- Dev shortcut: `python cli.py --folder ... --file ...` runs the CLI without installing.
+- Dev shortcut: `python -m plot_ptyrad --folder ... --file ...` runs the CLI without installing.
 
 ## Coding Style & Naming Conventions
 - Python code uses 4-space indentation and UTF-8 encoding.

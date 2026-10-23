@@ -26,10 +26,6 @@ plot_ptyrad = "plot_ptyrad.cli:main"
 
 [tool.setuptools]
 packages = ["plot_ptyrad"]
-py-modules = [
-    "cli", "config", "data_processor", "file_utils", "interactive_plotter",
-    "plot_pt_file", "ui_components", "video_generator",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

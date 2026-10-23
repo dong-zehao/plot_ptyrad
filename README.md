@@ -67,13 +67,11 @@ plot_ptyrad -f /path/to/parent_folder -F model_iter1000.pt --force
 
 ## 项目结构与开发
 
-核心实现位于独立的 Python 包内，根目录同名模块仅用于兼容已有脚本和 notebook 的导入。
+核心实现统一位于 `plot_ptyrad/` 包内。命令行使用 `plot_ptyrad` 或 `python -m plot_ptyrad`；脚本导入使用 `from plot_ptyrad.data_processor import DataProcessor` 等包路径。根目录旧模块和 `setup.py` 已移除，安装统一使用 `pyproject.toml`。
 
 ```text
 plot_ptyrad/
 ├── pyproject.toml          # 项目元信息、依赖、命令入口与测试配置
-├── setup.py                # 传统安装入口
-├── cli.py                  # 兼容 python cli.py
 ├── plot_ptyrad/
 │   ├── __init__.py
 │   ├── __main__.py         # python -m plot_ptyrad
@@ -87,7 +85,7 @@ plot_ptyrad/
 │   ├── file_utils.py
 │   └── config.py
 ├── notebooks/              # 探索用 notebook
-└── tests/                  # MAT 内容、变换、兼容入口与 CLI 回归测试
+└── tests/                  # MAT 内容、变换与 CLI 回归测试
 ```
 
 ```bash
