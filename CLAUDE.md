@@ -20,11 +20,11 @@ plot_ptyrad --folder /path/to/parent_folder --file model_iter1000.hdf5 --force
 python cli.py --folder ... --file ...
 ```
 
-No automated tests exist. Validate changes by running the CLI end-to-end with a sample dataset. If adding tests, use `pytest` in a `tests/` directory.
+Run automated regression tests with `python -m pytest`. Validate changes by running the CLI end-to-end with a sample dataset. If adding tests, use `pytest` in a `tests/` directory.
 
 ## Architecture
 
-Flat module structure at repo root (~1400 lines across 8 modules). Data flow:
+Implementation modules live in the `plot_ptyrad/` package; root modules preserve legacy imports. Packaging is configured in `pyproject.toml`. `mat_export.py` recursively exports numeric HDF5 datasets and transformed `object_3d`. Data flow:
 
 ```
 cli.py (entry point, arg parsing)

@@ -3,7 +3,7 @@
 These guidelines describe how to work with the `plot_ptyrad` CLI and codebase.
 
 ## Project Structure & Module Organization
-- Source is flat at the repository root (no package folder). Key modules include `cli.py` (entry point), `plot_pt_file.py` (file discovery/processing), `data_processor.py`, `interactive_plotter.py`, `ui_components.py`, `video_generator.py`, `file_utils.py`, and `config.py`.
+- Implementation lives in the `plot_ptyrad/` package; root modules are compatibility shims. Project configuration lives in `pyproject.toml`. Key modules include `cli.py` (entry point), `plot_pt_file.py` (file discovery/processing), `data_processor.py`, `interactive_plotter.py`, `ui_components.py`, `video_generator.py`, `file_utils.py`, and `config.py`.
 - Outputs are written under the user-specified parent folder as `Data_Saved/<region_name>/` (PNG/MP4/MAT artifacts).
 - Documentation and usage examples live in `README.md` (Chinese).
 
@@ -19,7 +19,7 @@ These guidelines describe how to work with the `plot_ptyrad` CLI and codebase.
 - No formatter or linter is configured; keep changes minimal and readable, and add brief docstrings for new public functions.
 
 ## Testing Guidelines
-- No automated tests or coverage targets are configured in this repository.
+- Run regression tests with `python -m pytest`; tests live in `tests/`. No coverage target is configured.
 - If you add tests, prefer `pytest` and place them in `tests/` with `test_*.py` naming.
 - Validate changes with a small sample dataset by running the CLI end-to-end.
 

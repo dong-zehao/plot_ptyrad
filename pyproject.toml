@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plot-ptyrad"
+version = "0.0.0"
+description = "PtyRAD重构数据可视化工具"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{name = "dong-zehao"}]
+dependencies = [
+    "torch>=1.9.0", "h5py>=3.8.0", "numpy>=1.21.0",
+    "matplotlib>=3.5.0", "scipy>=1.7.0", "PyYAML>=6.0",
+    "imageio>=2.19.0", "imageio-ffmpeg>=0.4.7", "tqdm>=4.62.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/dong-zehao/plot_ptyrad"
+
+[project.scripts]
+plot_ptyrad = "plot_ptyrad.cli:main"
+
+[tool.setuptools]
+packages = ["plot_ptyrad"]
+py-modules = [
+    "cli", "config", "data_processor", "file_utils", "interactive_plotter",
+    "plot_pt_file", "ui_components", "video_generator",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
