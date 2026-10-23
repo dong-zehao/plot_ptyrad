@@ -112,3 +112,45 @@ python -m plot_ptyrad --folder /path/to/parent_folder --file model_iter1000.hdf5
 ### 已验证环境
 
 回归测试使用 Python 3.12、PyTorch 2.2.2、NumPy 1.26.4，采用无窗口模式生成图像和视频。若使用旧版 PyTorch 2.2.2，需配合 NumPy 1.x；NumPy 2.x 会导致张量与 NumPy 数组转换失败。建议在独立环境安装兼容版本，例如 `pip install "numpy<2"`。
+
+## Qt 高响应界面
+
+`UI_update` 分支使用 **PySide6（Qt 6）原生控件 + PyQtGraph**。交互画布不再由 Matplotlib 重绘；Matplotlib 仅用于生成原有格式的高分辨率 PNG 和视频帧。
+
+### 安装与启动
+
+需要 Python **3.9 或更新版本**；建议使用 Python 3.10–3.12。更新代码后，在运行 PtyRAD 的环境中重新安装依赖：
+
+```bash
+pip install -e ".[dev]"
+plot_ptyrad --folder /path/to/parent_folder --file model_iter1000.pt --force
+```
+
+新增依赖是 `PySide6-Essentials>=6.5,<7` 和 `pyqtgraph>=0.13.7,<0.14`。Essentials 提供本项目所需的 Qt 控件和绘图模块，无需安装 WebEngine。界面不强制依赖 OpenGL 或独立显卡。CLI 参数、文件发现规则和 `Data_Saved/<region>/` 输出位置保持一致。
+
+### 布局与操作
+
+- 左上为图像和色条；右侧依次是保存按钮、Display Mode、Color Schemes 和 FFT Contrast；底部七组滑块仍按 Layer Start、Layer Count、Rotation、Crop X/Y、Center X/Y 排列；右下保留 Next Region 和 End。
+- 数字输入框按 Enter 或离开焦点时应用，滑块与输入框双向同步；旋转精度为 0.1°，FFT Gamma 精度为 0.01。
+- 保留五种原有色图、原图/FFT 切换、连续层叠加、旋转、裁剪与中心偏移。Crop X 仍对应第一空间维，Crop Y 对应第二空间维。
+- 图像支持鼠标拖动平移、滚轮缩放；右键菜单中的 View All 或缩放后出现的 A 按钮可恢复完整视图。
+- 参数修改后延迟约 350 ms 自动保存，切换区域、结束或关闭窗口时立即保存。标题栏关闭窗口仍进入下一区域；End 结束整个处理流程。
+- Save Image 和 Save All Videos & MAT 使用**点击时的参数快照**，在后台导出。导出时仍可调整预览；保存和切换区域按钮暂时禁用，完成后恢复，防止重复导出或中途关闭。失败信息显示在右侧状态区及终端。
+- PNG 继续使用 600 dpi 输出；视频与 MAT 的内容、命名和已有视频的跳过规则保持一致。预览降采样只作用于屏幕显示，导出仍使用完整分辨率数据。
+
+### 响应速度优化
+
+预览在独立工作线程执行；主线程只处理控件与显示。每轮最多保留一个正在运行的请求和一个最新请求，约每 16 ms 检查结果，丢弃过时画面，避免快速拖动后逐帧追赶。
+
+缓存仅保留最近一次的二维中间结果，不建立第二份完整三维体：切换色图只更新查找表；改变 Gamma 复用 FFT 功率；改变裁剪复用已旋转的图像；相同层范围复用叠加结果。旋转仍使用原来的 SciPy 插值，FFT 仍使用原来的高斯窗和数值公式。
+
+### 开发与验证
+
+```bash
+# Qt 在无桌面环境中运行真实控件及事件循环
+QT_QPA_PLATFORM=offscreen python -m pytest -q
+```
+
+测试包含数值对照、控件同步、快速拖动合并、后台导出与异常恢复、区域切换、单像素图像，以及真实 PNG/MP4/MAT 输出。无窗口 Qt 测试通过 `create_interface(block=False)` 嵌入事件循环；正常 CLI 仍按区域阻塞，等待用户操作。`MPLBACKEND=Agg` 仅影响 Matplotlib，不能用于关闭 Qt 界面。
+
+新增模块：`render_engine.py` 管理分阶段预览缓存，`image_export.py` 提供独立 Agg 图片导出；`interactive_plotter.py` 负责后台任务和界面事件，`ui_components.py` 定义原生 Qt 布局与控件。

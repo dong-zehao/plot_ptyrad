@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 
@@ -96,18 +97,43 @@ def test_failed_write_preserves_previous_file(model, tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.mat")) == [tmp_path / "model.mat"]
 
 
-def test_cli_hdf5_headless(model, tmp_path):
-    path, _, _ = model
+@pytest.mark.parametrize('extension', ['.hdf5', '.pt'])
+def test_cli_headless_multiple_regions(model, tmp_path, extension):
+    path, _, tensors = model
+    if extension == '.pt':
+        path = path.with_suffix('.pt')
+        torch.save({'optimizable_tensors': tensors}, path)
+    second_path = tmp_path / 'region02' / 'nested' / path.name
+    second_path.parent.mkdir(parents=True)
+    shutil.copyfile(path, second_path)
+    # Drive the real CLI and its blocking Qt event loop offscreen.
+    driver = '''
+import runpy
+from PySide6 import QtCore, QtWidgets
+app = QtWidgets.QApplication([])
+app.setQuitOnLastWindowClosed(False)
+timer = QtCore.QTimer()
+def advance():
+    for window in app.topLevelWidgets():
+        if (window.isVisible() and hasattr(window, 'buttons')
+                and window.image.image is not None):
+            print('CLI_UI_READY')
+            window.buttons['next_region'].click()
+timer.timeout.connect(advance)
+timer.start(100)
+runpy.run_module('plot_ptyrad', run_name='__main__')
+'''
     result = subprocess.run(
-        [sys.executable, "-m", "plot_ptyrad", "--folder", str(tmp_path),
+        [sys.executable, "-c", driver, "--folder", str(tmp_path),
          "--file", path.name, "--force"],
         capture_output=True, text=True,
-        env=dict(os.environ, MPLBACKEND="Agg"), timeout=60)
+        env=dict(os.environ, MPLBACKEND="Agg", QT_QPA_PLATFORM="offscreen"), timeout=60)
     assert result.returncode == 0, result.stderr
-    assert "成功处理了 1/1" in result.stdout
+    assert "成功处理了 2/2" in result.stdout
+    assert result.stdout.count('CLI_UI_READY') == 2
 
 
-def test_image_video_and_mat_pipeline(model, tmp_path):
+def test_image_video_and_mat_pipeline(model, tmp_path, qapp, spin_until):
     from plot_ptyrad.interactive_plotter import InteractivePlotter
 
     path, _, tensors = model
@@ -118,9 +144,15 @@ def test_image_video_and_mat_pipeline(model, tmp_path):
     ParameterManager.save_plot_params(str(region), params)
     plotter = InteractivePlotter(tensors["objp"], str(path.parent), str(region),
                                  tensors, [(str(path), "region")])
-    plotter.create_interface()
-    plotter.save_current_image(None)
-    batch_save_videos_and_mat([(str(path), "region")], params, str(destination))
+    plotter.create_interface(block=False)
+    try:
+        spin_until(lambda: plotter.last_result is not None)
+        plotter.buttons['save_image'].click()
+        spin_until(lambda: plotter._export_future is None, timeout=60)
+        plotter.buttons['save_all_videos'].click()
+        spin_until(lambda: plotter._export_future is None, timeout=60)
+    finally:
+        plotter.window.close()
     assert any(p.stat().st_size > 0 for p in region.glob("*.png"))
     assert any(p.stat().st_size > 0 for p in region.glob("*.mp4"))
     assert loadmat(region / "model.mat")["object_3d"].shape == (6, 8, 3)

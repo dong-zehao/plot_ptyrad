@@ -1,165 +1,210 @@
-"""
-UI组件类 - 管理界面元素的创建和交互
-"""
+"""Native Qt controls arranged at the original Matplotlib panel positions."""
 
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, RadioButtons, Button, TextBox
+from PySide6 import QtCore, QtGui, QtWidgets
+import pyqtgraph as pg
+
 from .config import UI_LAYOUT, COLORMAP_OPTIONS, DISPLAY_MODE_OPTIONS
 
-class UIComponents:
-    """UI组件管理器"""
 
-    def __init__(self, fig, data_shape, saved_params, initial_rotation):
-        self.fig = fig
-        self.data_shape = data_shape
-        self.saved_params = saved_params
-        self.initial_rotation = initial_rotation
+class NumericControl(QtWidgets.QWidget):
+    """A native slider and editable value with one change notification."""
 
-        self.sliders = {}
-        self.textboxes = {}
-        self.gamma_slider = None
-        self.radio_cmap = None
-        self.radio_display_mode = None
-        self.buttons = {}
+    changed = QtCore.Signal()
 
-    def create_all_components(self):
-        """创建所有UI组件"""
-        self.sliders, self.textboxes = self._create_sliders()
-        self.gamma_slider = self._create_gamma_slider()
-        self.radio_cmap = self._create_colormap_selector()
-        self.radio_display_mode = self._create_display_mode_selector()
-        self.buttons = self._create_control_buttons()
-        return self.sliders, self.textboxes, self.gamma_slider, self.radio_cmap, self.radio_display_mode, self.buttons
+    def __init__(self, title, minimum, maximum, value, decimals=0, color='#3498db', parent=None):
+        super().__init__(parent)
+        self.scale = 10 ** decimals
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        label = QtWidgets.QLabel(title)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet('font-weight: bold;')
+        layout.addWidget(label)
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.slider.setRange(round(minimum * self.scale), round(maximum * self.scale))
+        self.slider.setStyleSheet(
+            'QSlider::groove:horizontal { height: 5px; background: #dce2e7; border-radius: 2px; }'
+            f'QSlider::sub-page:horizontal {{ background: {color}; }}'
+            f'QSlider::handle:horizontal {{ background: {color}; width: 12px; margin: -4px 0; border-radius: 6px; }}')
+        self.editor = QtWidgets.QDoubleSpinBox() if decimals else QtWidgets.QSpinBox()
+        if decimals:
+            self.editor.setDecimals(decimals)
+            self.editor.setSingleStep(1 / self.scale)
+        self.editor.setRange(minimum, maximum)
+        self.editor.setKeyboardTracking(False)
+        self.editor.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.editor.setAccessibleName(title)
+        self.slider.setAccessibleName(title)
+        layout.addWidget(self.slider)
+        layout.addWidget(self.editor)
+        self.slider.valueChanged.connect(self._from_slider)
+        self.editor.valueChanged.connect(self.set_value)
+        self.set_value(value)
 
-    def _create_sliders(self):
-        """创建控制滑块和对应的数值输入框"""
-        layout = UI_LAYOUT
-        col_positions = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65]
-        base_y = 0.22
-        title_y = base_y + 0.035
-        textbox_y = base_y - 0.04
+    @property
+    def value(self):
+        return self.slider.value() / self.scale
 
-        sliders = {}
-        textboxes = {}
-        slider_configs = [
-            ('start', 0, self.data_shape[2]-1, self.saved_params.get('start_layer', 0), 'Layer Start'),
-            ('count', 1, self.data_shape[2], self.saved_params.get('layer_count', 1), 'Layer Count'),
-            ('rotation', -180, 180, self.initial_rotation, 'Rotation'),
-            ('crop_x', 0, self.data_shape[0]//2, self.saved_params.get('crop_x', 0), 'Crop X'),
-            ('crop_y', 0, self.data_shape[1]//2, self.saved_params.get('crop_y', 0), 'Crop Y'),
-            ('crop_center_x', -(self.data_shape[0]//2), self.data_shape[0]//2, self.saved_params.get('crop_center_x', 0), 'Center X'),
-            ('crop_center_y', -(self.data_shape[1]//2), self.data_shape[1]//2, self.saved_params.get('crop_center_y', 0), 'Center Y'),
+    def _from_slider(self, value):
+        blocker = QtCore.QSignalBlocker(self.editor)
+        self.editor.setValue(value / self.scale if self.scale > 1 else value)
+        del blocker
+        self.changed.emit()
+
+    def set_value(self, value):
+        """Clamp and synchronize both widgets, including unchanged slider values."""
+        self.slider.setValue(round(value * self.scale))
+        blocker = QtCore.QSignalBlocker(self.editor)
+        self.editor.setValue(self.value if self.scale > 1 else int(self.value))
+        del blocker
+
+    def set_maximum(self, value):
+        """Update the valid range when the start layer changes."""
+        self.editor.setMaximum(value)
+        self.slider.setMaximum(round(value * self.scale))
+
+
+class RadioSelector(QtWidgets.QGroupBox):
+    """Exclusive native radio buttons with the existing option names."""
+
+    changed = QtCore.Signal()
+
+    def __init__(self, title, options, selected, parent=None):
+        super().__init__(title, parent)
+        self.group = QtWidgets.QButtonGroup(self)
+        self.options = {}
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 16, 12, 6)
+        layout.setSpacing(1)
+        for option in options:
+            button = QtWidgets.QRadioButton(option)
+            self.group.addButton(button)
+            self.options[option] = button
+            layout.addWidget(button)
+        self.options[selected if selected in options else options[0]].setChecked(True)
+        self.group.buttonClicked.connect(lambda _: self.changed.emit())
+
+    @property
+    def value(self):
+        return self.group.checkedButton().text()
+
+
+class SmoothImageItem(pg.ImageItem):
+    """Retain smooth image scaling while using PyQtGraph's fast raster path."""
+
+    def paint(self, painter, *args):
+        painter.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform, True)
+        super().paint(painter, *args)
+
+
+class UIComponents(QtWidgets.QWidget):
+    """Keep the original left plot / bottom controls / right panels layout."""
+
+    closing = QtCore.Signal()
+
+    def __init__(self, data_shape, saved_params, initial_rotation):
+        super().__init__()
+        self.setWindowTitle('PtyRAD — Object Phase Visualization')
+        self.setMinimumSize(1100, 720)
+        self.resize(1440, 880)
+        self.setStyleSheet('''
+            QWidget { background: #fafafa; color: #2c3e50; font-size: 12px; }
+            QGroupBox { border: 1px solid #bdc3c7; border-radius: 4px; font-weight: bold; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; }
+            QRadioButton { font-size: 14px; font-weight: normal; }
+            QSpinBox, QDoubleSpinBox { background: white; border: 1px solid #bdc3c7; border-radius: 3px; min-height: 22px; }
+            QPushButton { color: white; font-weight: bold; border-radius: 4px; }
+            QPushButton:disabled { background: #b0bec5; }
+        ''')
+        self.placements = []
+        self.can_close = lambda: True
+        self.graphics = pg.GraphicsLayoutWidget(parent=self)
+        self.graphics.setBackground('white')
+        self.plot = self.graphics.addPlot()
+        self.plot.hideAxis('left')
+        self.plot.hideAxis('bottom')
+        self.plot.setMenuEnabled(True)
+        self.plot.setAspectLocked(True)
+        self.plot.invertY(True)
+        self.image = SmoothImageItem(axisOrder='row-major')
+        self.image.setAutoDownsample(True)
+        self.plot.addItem(self.image)
+        self.colorbar = pg.ColorBarItem(values=(0, 1), interactive=False,
+                                       colorMapMenu=False)
+        self.colorbar.setImageItem(self.image, insert_in=self.plot)
+        self.colorbar.axis.setPen('#34495e')
+        self.colorbar.axis.setTextPen('#34495e')
+        self._place(self.graphics, UI_LAYOUT['main_plot'])
+        self.title = QtWidgets.QLabel('Object Phase Visualization', self)
+        self.title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.title.setWordWrap(True)
+        self._place(self.title, [0.05, 0.96, 0.70, 0.035])
+
+        self.controls = {}
+        h, w, depth = data_shape
+        configs = [
+            ('start', 'Layer Start', 0, depth - 1, saved_params.get('start_layer', 0)),
+            ('count', 'Layer Count', 1, depth, saved_params.get('layer_count', 1)),
+            ('rotation', 'Rotation', -180, 180, initial_rotation),
+            # At least one pixel must survive a symmetric crop.
+            ('crop_x', 'Crop X', 0, (h - 1) // 2, saved_params.get('crop_x', 0)),
+            ('crop_y', 'Crop Y', 0, (w - 1) // 2, saved_params.get('crop_y', 0)),
+            ('crop_center_x', 'Center X', -(h // 2), h // 2, saved_params.get('crop_center_x', 0)),
+            ('crop_center_y', 'Center Y', -(w // 2), w // 2, saved_params.get('crop_center_y', 0)),
         ]
-
         colors = ['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22']
-        edge_colors = ['#2980b9', '#27ae60', '#c0392b', '#e67e22', '#8e44ad', '#16a085', '#d35400']
+        for index, (name, title, low, high, initial) in enumerate(configs):
+            control = NumericControl(title, low, high, initial, decimals=1 if name == 'rotation' else 0,
+                                     color=colors[index], parent=self)
+            self.controls[name] = control
+            self._place(control, [0.05 + index * 0.10, 0.175, 0.08, 0.095])
 
-        for i, (name, min_val, max_val, init_val, title) in enumerate(slider_configs):
-            # 创建slider
-            ax_slider = plt.axes([col_positions[i], base_y, layout['slider_width'], layout['slider_height']])
-            ax_slider.set_facecolor('#ecf0f1')
+        self.colormap = RadioSelector('Color Schemes', COLORMAP_OPTIONS,
+                                      saved_params.get('colormap', 'viridis'), self)
+        self.display_mode = RadioSelector('Display Mode', DISPLAY_MODE_OPTIONS,
+                                          saved_params.get('display_mode', 'original'), self)
+        self._place(self.colormap, UI_LAYOUT['colormap_panel'])
+        self._place(self.display_mode, UI_LAYOUT['display_mode_panel'])
+        self.gamma = NumericControl('FFT Contrast (γ)', 0, 1, saved_params.get('fft_gamma', 0),
+                                    decimals=2, color='#e74c3c', parent=self)
+        self._place(self.gamma, [0.79, 0.29, 0.17, 0.085])
+        self.buttons = {}
+        for name, title, color, y in [
+            ('save_image', 'Save Image', '#4caf50', 0.88),
+            ('save_all_videos', 'Save All Videos & MAT', '#2196f3', 0.82),
+            ('next_region', 'Next Region', '#ff9800', 0.08),
+            ('end', 'End', '#f44336', 0.02),
+        ]:
+            button = QtWidgets.QPushButton(title.replace('&', '&&'), self)
+            button.setStyleSheet(f'QPushButton:enabled {{ background: {color}; }}')
+            self.buttons[name] = button
+            self._place(button, [0.78, y, 0.19, 0.05])
 
-            slider = Slider(ax_slider, '', min_val, max_val,
-                           valinit=init_val, valfmt='%d' if name != 'rotation' else '%.1f',
-                           facecolor=colors[i], edgecolor=edge_colors[i], alpha=0.8)
+        guide = QtWidgets.QLabel(
+            '<b>Controls Guide:</b><br>'
+            '• Set start layer and count to sum consecutive layers • Rotate and crop for optimal view<br>'
+            '• Center X/Y shifts the crop window from image center • Press Enter in text boxes to apply value<br>'
+            f'• Data shape: {h}×{w} pixels, {depth} layers • Parameters auto-saved', self)
+        guide.setWordWrap(True)
+        self._place(guide, [0.07, 0.035, 0.67, 0.105])
+        self.status = QtWidgets.QLabel('', self)
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet('color: #596b78; font-size: 11px;')
+        self._place(self.status, [0.78, 0.16, 0.19, 0.11])
 
-            self._style_slider(slider)
-            sliders[name] = slider
+    def _place(self, widget, rect):
+        self.placements.append((widget, rect))
 
-            # 添加标题
-            plt.figtext(col_positions[i] + layout['slider_width'] / 2, title_y, title,
-                       fontsize=9, fontweight='bold', ha='center', color='#34495e')
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        for widget, (x, y, width, height) in self.placements:
+            widget.setGeometry(round(x * self.width()), round((1 - y - height) * self.height()),
+                               round(width * self.width()), round(height * self.height()))
 
-            # 创建数值输入框
-            ax_text = plt.axes([col_positions[i], textbox_y, layout['slider_width'], 0.025])
-            fmt_val = str(int(init_val)) if name != 'rotation' else f'{init_val:.1f}'
-            textbox = TextBox(ax_text, '', initial=fmt_val)
-            textbox.label.set_fontsize(9)
-            textboxes[name] = textbox
-
-        return sliders, textboxes
-
-    def _style_slider(self, slider):
-        """设置滑块样式"""
-        slider.label.set_fontsize(10)
-        slider.label.set_color('#2c3e50')
-        slider.valtext.set_fontsize(9)
-        slider.valtext.set_color('#2c3e50')
-
-    def _create_radio_selector(self, panel_key, title, options, active_color, edge_color, param_key, default_value):
-        """通用RadioButton选择器创建方法"""
-        ax = plt.axes(UI_LAYOUT[panel_key])
-        ax.set_facecolor('#f8f9fa')
-        ax.set_title(title, fontsize=15, fontweight='bold', pad=5, color='#2c3e50')
-
-        radio = RadioButtons(ax, options, activecolor=active_color,
-                            radio_props={'s': 40, 'edgecolor': edge_color, 'linewidth': 1.5})
-
-        for label in radio.labels:
-            label.set_fontsize(14)
-            label.set_color('#2c3e50')
-            label.set_fontweight('normal')
-
-        for spine in ax.spines.values():
-            spine.set_color('#bdc3c7')
-            spine.set_linewidth(1.5)
-
-        initial_value = self.saved_params.get(param_key, default_value)
-        radio.set_active(list(options).index(initial_value))
-
-        return radio
-
-    def _create_colormap_selector(self):
-        """创建颜色映射选择器"""
-        return self._create_radio_selector(
-            'colormap_panel', 'Color Schemes', COLORMAP_OPTIONS,
-            '#3498db', '#99B2C1', 'colormap', 'viridis')
-
-    def _create_display_mode_selector(self):
-        """创建显示模式选择器"""
-        return self._create_radio_selector(
-            'display_mode_panel', 'Display Mode', DISPLAY_MODE_OPTIONS,
-            '#e74c3c', '#E74C3C', 'display_mode', 'original')
-
-    def _create_gamma_slider(self):
-        """创建gamma调整滑块"""
-        ax_gamma = plt.axes(UI_LAYOUT['gamma_slider_panel'])
-        ax_gamma.set_facecolor('#ecf0f1')
-
-        initial_gamma = self.saved_params.get('fft_gamma', 0.0)
-        gamma_slider = Slider(ax_gamma, 'FFT γ', 0.0, 1.0,
-                            valinit=initial_gamma, valfmt='%.2f',
-                            facecolor='#e74c3c', edgecolor='#c0392b', alpha=0.8)
-
-        self._style_slider(gamma_slider)
-
-        # 添加标题
-        plt.figtext(0.87, 0.35, 'FFT Contrast',
-                   fontsize=10, fontweight='bold', ha='center', color='#34495e')
-
-        return gamma_slider
-
-    def _create_control_buttons(self):
-        """创建控制按钮"""
-        layout = UI_LAYOUT
-        buttons = {}
-
-        button_configs = [
-            ('save_image', 'Save Image', '#4caf50', '#45a049', '#e8f5e8', 0.88),
-            ('save_all_videos', 'Save All Videos & MAT', '#2196f3', '#1976d2', '#e3f2fd', 0.82),
-            ('next_region', 'Next Region', '#ff9800', '#f57c00', '#fff3e0', 0.08),
-            ('end', 'End', '#f44336', '#d32f2f', '#ffebee', 0.02)
-        ]
-
-        for name, text, color, hover_color, bg_color, y_pos in button_configs:
-            ax_btn = plt.axes([0.78, y_pos, layout['button_width'], layout['button_height']])
-            ax_btn.set_facecolor(bg_color)
-
-            button = Button(ax_btn, text, color=color, hovercolor=hover_color)
-            button.label.set_fontsize(12)
-            button.label.set_fontweight('bold')
-            button.label.set_color('#ffffff')
-
-            buttons[name] = button
-
-        return buttons
+    def closeEvent(self, event):
+        if not self.can_close():
+            event.ignore()
+            return
+        self.closing.emit()
+        event.accept()

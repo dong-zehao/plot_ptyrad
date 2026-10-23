@@ -7,12 +7,13 @@ name = "plot-ptyrad"
 version = "0.0.0"
 description = "PtyRAD重构数据可视化工具"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 authors = [{name = "dong-zehao"}]
 dependencies = [
     "torch>=1.9.0", "h5py>=3.8.0", "numpy>=1.21.0",
     "matplotlib>=3.5.0", "scipy>=1.7.0", "PyYAML>=6.0",
     "imageio>=2.19.0", "imageio-ffmpeg>=0.4.7", "tqdm>=4.62.0",
+    "PySide6-Essentials>=6.5,<7", "pyqtgraph>=0.13.7,<0.14",
 ]
 
 [project.optional-dependencies]

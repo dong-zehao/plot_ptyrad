@@ -181,12 +181,23 @@ class DataProcessor:
     @staticmethod
     def calculate_fft_data_and_extent(data, probe_dx, gamma=0.0):
         """计算FFT数据和对应的k空间范围，支持gamma调整"""
+        fft_magnitude = DataProcessor.calculate_fft_power(data)
+        return (DataProcessor.apply_fft_gamma(fft_magnitude, gamma),
+                DataProcessor.calculate_fft_extent(data.shape, probe_dx))
+
+    @staticmethod
+    def calculate_fft_power(data):
+        """计算加高斯窗后的 FFT 功率，供显示缓存与导出共用。"""
         # 应用高斯窗口以减少周期性边界伪影
         windowed_data = DataProcessor.apply_gaussian_window(data)
         
         # 计算2D FFT并移到中心
         fft_data = np.fft.fftshift(np.fft.fft2(windowed_data))
-        fft_magnitude = np.abs(fft_data)**2
+        return np.abs(fft_data)**2
+
+    @staticmethod
+    def apply_fft_gamma(fft_magnitude, gamma):
+        """只调整已计算的 FFT 功率的显示对比度。"""
         
         # 应用gamma调整：gamma校正是将图像强度进行幂次变换
         if gamma <= 0.01:
@@ -200,13 +211,18 @@ class DataProcessor:
             normalized_data = (fft_magnitude - fft_magnitude.min()) / (fft_magnitude.max() - fft_magnitude.min() + 1e-10)
             fft_display = normalized_data ** gamma
         
+        return fft_display
+
+    @staticmethod
+    def calculate_fft_extent(data_shape, probe_dx):
+        """计算 FFT 坐标范围，保持原有像素和物理单位约定。"""
         # 计算k空间范围
         if probe_dx is not None:
             # 将probe_dx从埃转换为纳米
             pixel_size_nm = probe_dx / 10.0
             
             # 计算k空间范围 (单位: 1/nm)
-            ny, nx = data.shape
+            ny, nx = data_shape
             kx_max = 1.0 / (2.0 * pixel_size_nm)  # Nyquist频率
             ky_max = 1.0 / (2.0 * pixel_size_nm)
             
@@ -217,12 +233,12 @@ class DataProcessor:
             # extent格式: [x_min, x_max, y_max, y_min] (注意y轴翻转)
             extent = [kx[0], kx[-1], ky[-1], ky[0]]
             
-            return fft_display, extent
+            return extent
         else:
             # 如果没有probe_dx信息，使用像素单位
-            ny, nx = data.shape
+            ny, nx = data_shape
             extent = [-nx//2, nx//2, ny//2, -ny//2]
-            return fft_display, extent
+            return extent
     
     @staticmethod
     def get_labels_and_units(probe_dx, is_fft=False, gamma=0.0):

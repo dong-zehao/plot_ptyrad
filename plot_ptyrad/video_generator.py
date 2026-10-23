@@ -5,7 +5,8 @@
 import os
 import tempfile
 import numpy as np
-import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 import imageio.v2 as imageio
 from tqdm import tqdm
 
@@ -19,7 +20,6 @@ class VideoGenerator:
 
     def __init__(self, save_dir):
         self.save_dir = save_dir
-        plt.rcParams.update(MATPLOTLIB_CONFIG)
 
     def generate_frame(self, data, layer_idx, params, slice_thickness=None, probe_dx=None):
         """生成单帧图像"""
@@ -41,7 +41,9 @@ class VideoGenerator:
             depth_info = f" (Depth: {depth_nm:.1f} nm)"
 
         # 创建图像
-        frame_fig, frame_ax = plt.subplots(figsize=(10, 8))
+        frame_fig = Figure(figsize=(10, 8))
+        FigureCanvasAgg(frame_fig)
+        frame_ax = frame_fig.subplots()
         frame_fig.patch.set_facecolor('white')
 
         frame_im = frame_ax.imshow(display_data, cmap=params['colormap'],
@@ -63,7 +65,8 @@ class VideoGenerator:
 
         frame_im.set_clim(global_min, global_max)
 
-        frame_cb = plt.colorbar(frame_im, ax=frame_ax, shrink=0.8)
+        frame_cb = frame_fig.colorbar(frame_im, ax=frame_ax, shrink=0.8)
+        frame_cb.ax.tick_params(labelsize=MATPLOTLIB_CONFIG['ytick.labelsize'])
         frame_cb.set_label(cbar_label, fontsize=12, color='#2c3e50')
 
         return frame_fig
@@ -103,13 +106,14 @@ class VideoGenerator:
                 frame_fig.savefig(temp_frame_path, dpi=150, bbox_inches='tight',
                                 facecolor='white', pad_inches=0.1)
                 frames.append(temp_frame_path)
-                plt.close(frame_fig)
+                frame_fig.clear()
 
             self._encode_video(frames, video_filepath)
             print(f"  视频已保存: {video_filepath}")
 
         except Exception as e:
             print(f"  生成视频失败: {e}")
+            raise
 
         finally:
             for frame_path in frames:
@@ -144,15 +148,17 @@ class VideoGenerator:
 
         except Exception as e:
             print(f"    MP4编码失败: {e}")
+            raise
 
 
 def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir):
-    """批量生成视频和MAT文件"""
+    """批量生成视频和MAT文件，返回失败项供界面报告。"""
+    failures = []
     print("开始批量生成视频和MAT文件...")
 
     if not all_pt_files:
         print("未找到任何模型文件进行批量处理")
-        return
+        return failures
 
     print(f"找到 {len(all_pt_files)} 个模型文件需要处理")
 
@@ -188,5 +194,7 @@ def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir):
 
         except Exception as e:
             print(f"处理文件 {os.path.basename(pt_file_path)} 时出错: {e}")
+            failures.append(f"{region_number}: {e}")
 
     print("\n批量视频和MAT文件生成完成!")
+    return failures

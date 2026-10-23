@@ -1,19 +1,24 @@
-"""
-交互式绘图模块
-"""
+"""Responsive Qt/PyQtGraph viewer with latest-request-only background rendering."""
 
 import os
-import numpy as np
-import matplotlib.pyplot as plt
+from concurrent.futures import ThreadPoolExecutor
 
-from .config import PROCESSING_STATE, UI_LAYOUT, MATPLOTLIB_CONFIG
-from .ui_components import UIComponents
+import numpy as np
+from PySide6 import QtCore, QtWidgets
+import pyqtgraph as pg
+from matplotlib import colormaps
+
+from .config import PROCESSING_STATE
 from .data_processor import DataProcessor, ParameterManager
-from .video_generator import VideoGenerator, batch_save_videos_and_mat
+from .render_engine import RenderEngine
+from .ui_components import UIComponents
+
+
+_application = None
 
 
 class InteractivePlotter:
-    """交互式绘图器"""
+    """Keep the existing CLI and export workflow with native Qt interaction."""
 
     def __init__(self, objp_tensor, pt_file_dir, save_dir, optimizable_tensors=None, all_pt_files=None):
         self.objp_tensor = objp_tensor
@@ -21,325 +26,247 @@ class InteractivePlotter:
         self.save_dir = save_dir
         self.optimizable_tensors = optimizable_tensors
         self.all_pt_files = all_pt_files
-
-        # 重置状态
-        global PROCESSING_STATE
-        PROCESSING_STATE['next_region'] = False
-        PROCESSING_STATE['end_processing'] = False
-
-        # 设置matplotlib样式
-        plt.rcParams.update(MATPLOTLIB_CONFIG)
-
-        # 防止TextBox→Slider→update_display→TextBox循环
-        self._updating_textboxes = False
-
-        # 初始化数据
-        self._prepare_data()
-
-    def _prepare_data(self):
-        """准备数据"""
-        self.probe_dx, self.pos_scan_affine = DataProcessor.load_yml_params(self.pt_file_dir)
-        self.saved_params = ParameterManager.load_plot_params(self.save_dir)
-
+        PROCESSING_STATE.update(next_region=False, end_processing=False)
+        self.probe_dx, self.pos_scan_affine = DataProcessor.load_yml_params(pt_file_dir)
+        self.saved_params = ParameterManager.load_plot_params(save_dir)
         self.initial_rotation = self.saved_params.get('rotation_angle', 0)
         if self.initial_rotation == 0 and self.pos_scan_affine is not None and len(self.pos_scan_affine) > 2:
             self.initial_rotation = -self.pos_scan_affine[2]
         self.initial_rotation = DataProcessor.normalize_angle(self.initial_rotation)
+        self.data = DataProcessor.prepare_object_volume(objp_tensor)
+        if any(size == 0 for size in self.data.shape):
+            raise ValueError('objp 的空间维度和层数必须大于零。')
+        self.engine = RenderEngine(self.data, self.probe_dx)
+        self._render_future = self._export_future = None
+        self._pending_params = None
+        self._closed = False
+        self._close_action = None
+        self.last_result = None
+        self._color_maps = {}
 
-        self.data = DataProcessor.prepare_object_volume(self.objp_tensor)
-
-        self.slice_thickness = None
-        if self.optimizable_tensors and 'slice_thickness' in self.optimizable_tensors:
-            self.slice_thickness = self.optimizable_tensors['slice_thickness'].detach().cpu().numpy().item()
-
-    def create_interface(self):
-        """创建交互界面"""
-        self.fig = plt.figure(figsize=UI_LAYOUT['figure_size'])
-        self.fig.patch.set_facecolor('#fafafa')
-
-        self.ax = plt.axes(UI_LAYOUT['main_plot'])
-        self.ax.set_facecolor('#ffffff')
-
-        self._setup_initial_display()
-
-        ui = UIComponents(self.fig, self.data.shape, self.saved_params, self.initial_rotation)
-        self.sliders, self.textboxes, self.gamma_slider, self.radio_cmap, self.radio_display_mode, self.buttons = ui.create_all_components()
-
-        self._add_info_text()
-        self.video_generator = VideoGenerator(self.save_dir)
-        self._connect_events()
+    def create_interface(self, block=True):
+        """Show the viewer; block per region unless embedded or tested with block=False."""
+        global _application
+        _application = QtWidgets.QApplication.instance()
+        if _application is None:
+            _application = QtWidgets.QApplication([])
+            _application.setQuitOnLastWindowClosed(False)
+        self.window = UIComponents(self.data.shape, self.saved_params, self.initial_rotation)
+        self.sliders = self.window.controls
+        self.textboxes = {name: control.editor for name, control in self.sliders.items()}
+        self.gamma_slider = self.window.gamma
+        self.radio_cmap = self.window.colormap
+        self.radio_display_mode = self.window.display_mode
+        self.buttons = self.window.buttons
+        self._render_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='ptyrad-preview')
+        self._export_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='ptyrad-export')
+        self._poll_timer = QtCore.QTimer(self.window)
+        self._poll_timer.setInterval(16)
+        self._poll_timer.timeout.connect(self._poll_workers)
+        self._request_timer = QtCore.QTimer(self.window)
+        self._request_timer.setSingleShot(True)
+        self._request_timer.setInterval(16)
+        self._request_timer.timeout.connect(self._start_pending_render)
+        self._save_timer = QtCore.QTimer(self.window)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(350)
+        self._save_timer.timeout.connect(self._save_params)
+        for control in self.sliders.values():
+            control.changed.connect(self.update_display)
+        self.gamma_slider.changed.connect(self.update_display)
+        self.radio_display_mode.changed.connect(self.update_display)
+        self.radio_cmap.changed.connect(self._change_colormap)
+        self.buttons['save_image'].clicked.connect(self._request_image_export)
+        self.buttons['save_all_videos'].clicked.connect(self.save_all_videos_batch)
+        self.buttons['next_region'].clicked.connect(self.next_region_clicked)
+        self.buttons['end'].clicked.connect(self.end_processing_clicked)
+        self.window.can_close = self._can_close
+        self.window.closing.connect(self._on_close)
+        self._change_colormap()
         self.update_display()
+        self.window.show()
+        if block:
+            loop = QtCore.QEventLoop()
+            self.window.closing.connect(loop.quit)
+            loop.exec()
+            self.window.deleteLater()
 
-        plt.show()
-
-    def _setup_initial_display(self):
-        """设置初始显示"""
-        initial_data = self.data[:, :, 0:1].sum(axis=2)
-        if abs(self.initial_rotation) > 0.1:
-            from scipy.ndimage import rotate
-            initial_data = rotate(initial_data, self.initial_rotation, reshape=False, mode='constant', cval=0)
-
-        self.im = self.ax.imshow(initial_data, cmap='viridis', interpolation='bilinear')
-        self.ax.set_title("Object Phase (objp) Visualization",
-                    fontsize=20, fontweight='bold', pad=25, color='#2c3e50')
-
-        self.ax.set_xticks([])
-        self.ax.set_yticks([])
-
-        for spine in self.ax.spines.values():
-            spine.set_color('#bdc3c7')
-            spine.set_linewidth(1)
-
-        self.cb = plt.colorbar(self.im, ax=self.ax, pad=0.015, aspect=25)
-        self.cb.ax.tick_params(labelsize=12, colors='#34495e')
-        self.cb.set_label('Phase (radians)', fontsize=14, labelpad=12, color='#34495e')
-        self.cb.outline.set_color('#bdc3c7')
-        self.cb.outline.set_linewidth(1)
-
-    def _add_info_text(self):
-        """添加说明文字"""
-        plt.figtext(0.07, 0.13, 'Controls Guide:', fontsize=13, fontweight='bold', color='#2c3e50')
-        plt.figtext(0.07, 0.10, '• Set start layer and count to sum consecutive layers • Rotate and crop for optimal view',
-                   fontsize=11, color='#7f8c8d')
-        plt.figtext(0.07, 0.07, '• Center X/Y shifts the crop window from image center • Press Enter in text boxes to apply value',
-                   fontsize=11, color='#7f8c8d')
-        plt.figtext(0.07, 0.04, f'• Data shape: {self.data.shape[0]}×{self.data.shape[1]} pixels, {self.data.shape[2]} layers • Parameters auto-saved',
-                   fontsize=11, color='#7f8c8d')
-
-    def _connect_events(self):
-        """连接事件处理器"""
-        for slider in self.sliders.values():
-            slider.on_changed(self.update_display)
-        self.gamma_slider.on_changed(self.update_display)
-        self.radio_cmap.on_clicked(self.update_display)
-        self.radio_display_mode.on_clicked(self.update_display)
-
-        # 连接TextBox的on_submit事件
-        for name, textbox in self.textboxes.items():
-            textbox.on_submit(lambda text, n=name: self._on_textbox_submit(n, text))
-
-        # 连接按钮事件
-        self.buttons['save_image'].on_clicked(self.save_current_image)
-        self.buttons['save_all_videos'].on_clicked(self.save_all_videos_batch)
-        self.buttons['next_region'].on_clicked(self.next_region_clicked)
-        self.buttons['end'].on_clicked(self.end_processing_clicked)
-
-    def _on_textbox_submit(self, slider_name, text):
-        """TextBox提交回调：解析数值并同步到slider"""
-        if self._updating_textboxes:
-            return
-        try:
-            val = float(text)
-            slider = self.sliders[slider_name]
-            val = max(slider.valmin, min(slider.valmax, val))
-            slider.set_val(val)
-        except ValueError:
-            pass
-
-    def _sync_textboxes(self):
-        """将所有slider当前值同步到TextBox"""
-        self._updating_textboxes = True
-        try:
-            for name, slider in self.sliders.items():
-                if name == 'rotation':
-                    new_text = f'{slider.val:.1f}'
-                else:
-                    new_text = str(int(slider.val))
-                self.textboxes[name].set_val(new_text)
-        finally:
-            self._updating_textboxes = False
-
-    def update_display(self, val=None):
-        """更新显示"""
-        start_layer = int(self.sliders['start'].val)
-        layer_count = int(self.sliders['count'].val)
-        rotation_angle = DataProcessor.normalize_angle(self.sliders['rotation'].val)
-        crop_x = int(self.sliders['crop_x'].val)
-        crop_y = int(self.sliders['crop_y'].val)
-        crop_center_x = int(self.sliders['crop_center_x'].val)
-        crop_center_y = int(self.sliders['crop_center_y'].val)
-        display_mode = self.radio_display_mode.value_selected
-        gamma = self.gamma_slider.val
-
-        # 更新旋转滑块（如果角度被规范化）
-        if abs(rotation_angle - self.sliders['rotation'].val) > 0.1:
-            self.sliders['rotation'].set_val(rotation_angle)
-            return
-
-        # Clamp crop center到有效范围
-        crop_center_x = max(-crop_x, min(crop_x, crop_center_x))
-        crop_center_y = max(-crop_y, min(crop_y, crop_center_y))
-
-        # 处理层数据
-        current_data = self._process_layer_data(start_layer, layer_count)
-
-        # 使用render_view统一处理变换和显示
-        params = {
-            'rotation_angle': rotation_angle,
-            'crop_x': crop_x, 'crop_y': crop_y,
-            'crop_center_x': crop_center_x, 'crop_center_y': crop_center_y,
-            'display_mode': display_mode, 'fft_gamma': gamma,
-        }
-        display_data, extent, cbar_label = DataProcessor.render_view(
-            current_data, params, self.probe_dx)
-
-        # 更新图像显示
-        self._update_image_display(display_data, start_layer, layer_count, rotation_angle,
-                                 crop_x, crop_y, crop_center_x, crop_center_y,
-                                 display_mode, extent, cbar_label, gamma)
-
-        # 同步TextBox
-        self._sync_textboxes()
-
-    def _process_layer_data(self, start_layer, layer_count):
-        """处理层数据"""
-        end_layer = min(start_layer + layer_count - 1, self.data.shape[2] - 1)
-        if start_layer + layer_count > self.data.shape[2]:
-            max_count = self.data.shape[2] - start_layer
-            self.sliders['count'].set_val(max_count)
-            layer_count = max_count
-            end_layer = start_layer + layer_count - 1
-
-        if layer_count == 1:
-            return self.data[:, :, start_layer]
-        else:
-            return self.data[:, :, start_layer:end_layer+1].sum(axis=2)
-
-    def _update_image_display(self, display_data, start_layer, layer_count, rotation_angle,
-                            crop_x, crop_y, crop_center_x, crop_center_y,
-                            display_mode, extent, cbar_label, gamma):
-        """更新图像显示"""
-        self.im.set_data(display_data)
-        self.im.set_cmap(self.radio_cmap.value_selected)
-        self.im.set_extent(extent)
-
-        self.ax.set_xlim(extent[0], extent[1])
-        self.ax.set_ylim(extent[2], extent[3])
-        self.ax.set_xticks([])
-        self.ax.set_yticks([])
-        self.ax.set_aspect('equal', adjustable='box')
-
-        data_min, data_max = display_data.min(), display_data.max()
-        self.im.set_clim(data_min, data_max)
-        self.cb.update_normal(self.im)
-        self.cb.set_label(cbar_label, fontsize=14, labelpad=12, color='#34495e')
-
-        # 更新标题
-        end_layer = min(start_layer + layer_count - 1, self.data.shape[2] - 1)
-        layer_info = f" - Layer {start_layer}" if layer_count == 1 else f" - Layers {start_layer}-{end_layer} ({layer_count} layers summed)"
-        rotation_info = f", Rotation: {rotation_angle:.1f}°" if abs(rotation_angle) > 0.1 else ""
-
-        crop_info = ""
-        if crop_x > 0 or crop_y > 0:
-            center_info = ""
-            if crop_center_x != 0 or crop_center_y != 0:
-                center_info = f" Center: {crop_center_x},{crop_center_y}"
-            crop_info = f", Crop: {crop_x}×{crop_y}{center_info}"
-
-        if display_mode == 'fft':
-            mode_info = f" - FFT (γ={gamma:.2f})"
-            title_prefix = "Object Phase FFT"
-        else:
-            mode_info = ""
-            title_prefix = "Object Phase"
-
-        range_info = f" [Range: {data_min:.3f} to {data_max:.3f}]"
-
-        self.ax.set_title(f"{title_prefix}{layer_info}{rotation_info}{crop_info}{mode_info}{range_info}",
-                    fontsize=12, color='#2c3e50')
-
-        self.fig.canvas.draw()
+    def _change_colormap(self):
+        name = self.radio_cmap.value
+        if name not in self._color_maps:
+            positions = np.linspace(0, 1, 256)
+            self._color_maps[name] = pg.ColorMap(positions, colormaps[name](positions, bytes=True))
+        self.window.colorbar.setColorMap(self._color_maps[name])
+        self._save_timer.start()
 
     def get_current_params(self):
-        """获取当前参数"""
-        crop_x = int(self.sliders['crop_x'].val)
-        crop_y = int(self.sliders['crop_y'].val)
-        crop_center_x = max(-crop_x, min(crop_x, int(self.sliders['crop_center_x'].val)))
-        crop_center_y = max(-crop_y, min(crop_y, int(self.sliders['crop_center_y'].val)))
+        """Snapshot valid values using the original parameter names and crop axes."""
+        start = int(self.sliders['start'].value)
+        count = min(int(self.sliders['count'].value), self.data.shape[2] - start)
+        crop_x = int(self.sliders['crop_x'].value)
+        crop_y = int(self.sliders['crop_y'].value)
         return {
-            'start_layer': int(self.sliders['start'].val),
-            'layer_count': int(self.sliders['count'].val),
-            'rotation_angle': self.sliders['rotation'].val,
-            'crop_x': crop_x,
-            'crop_y': crop_y,
-            'crop_center_x': crop_center_x,
-            'crop_center_y': crop_center_y,
-            'colormap': self.radio_cmap.value_selected,
-            'display_mode': self.radio_display_mode.value_selected,
-            'fft_gamma': self.gamma_slider.val
+            'start_layer': start,
+            'layer_count': count,
+            'rotation_angle': DataProcessor.normalize_angle(self.sliders['rotation'].value),
+            'crop_x': crop_x, 'crop_y': crop_y,
+            'crop_center_x': max(-crop_x, min(crop_x, int(self.sliders['crop_center_x'].value))),
+            'crop_center_y': max(-crop_y, min(crop_y, int(self.sliders['crop_center_y'].value))),
+            'colormap': self.radio_cmap.value,
+            'display_mode': self.radio_display_mode.value,
+            'fft_gamma': self.gamma_slider.value,
         }
 
-    def save_current_image(self, event):
-        """保存当前图像"""
+    @staticmethod
+    def _data_key(params):
+        # Color changes are LUT-only. Gamma has no effect in original mode.
+        return tuple((key, value) for key, value in params.items()
+                     if key != 'colormap' and
+                     not (key == 'fft_gamma' and params['display_mode'] == 'original'))
+
+    def update_display(self, *_):
+        """Coalesce drag events, keeping at most one running and one latest request."""
+        if self._closed:
+            return
+        count = self.sliders['count']
+        blocker = QtCore.QSignalBlocker(count)
+        count.set_maximum(self.data.shape[2] - int(self.sliders['start'].value))
+        del blocker
         params = self.get_current_params()
+        self._save_timer.start()
+        self._pending_params = params
+        if not self._request_timer.isActive():
+            self._request_timer.start()
 
-        start_layer = params['start_layer']
-        layer_count = params['layer_count']
-        end_layer = min(start_layer + layer_count - 1, self.data.shape[2] - 1)
+    def _start_pending_render(self):
+        if self._closed or self._render_future is not None or self._pending_params is None:
+            return
+        params, self._pending_params = self._pending_params, None
+        if self.last_result is not None and self._data_key(params) == self._data_key(self.last_result.params):
+            return
+        self._render_future = self._render_executor.submit(self.engine.render, params)
+        self._poll_timer.start()
 
-        current_data = self._process_layer_data(start_layer, layer_count)
-        display_data, extent, cbar_label = DataProcessor.render_view(
-            current_data, params, self.probe_dx)
+    def _poll_workers(self):
+        if self._render_future is not None and self._render_future.done():
+            future, self._render_future = self._render_future, None
+            try:
+                result = future.result()
+                # A finished old frame must never replace newer requested settings.
+                if self._data_key(result.params) == self._data_key(self.get_current_params()):
+                    self._present(result)
+            except Exception as exc:
+                self.window.status.setText(f'预览失败：{exc}')
+            self._start_pending_render()
+        if self._export_future is not None and self._export_future.done():
+            future, self._export_future = self._export_future, None
+            try:
+                message = future.result()
+                self.window.status.setText(message)
+            except Exception as exc:
+                self.window.status.setText(f'导出失败：{exc}')
+                print(f'导出失败：{exc}')
+            for button in self.buttons.values():
+                button.setEnabled(True)
+        if self._render_future is None and self._export_future is None:
+            self._poll_timer.stop()
 
-        mode_suffix = f"_FFT_gamma{params['fft_gamma']:.2f}" if params['display_mode'] == 'fft' else ""
+    def _present(self, result):
+        self.last_result = result
+        low, high = result.levels
+        # A constant image needs a nonzero display range, without changing its data.
+        levels = (low, high) if high > low else (low, low + max(abs(low) * 1e-6, 1e-6))
+        self.window.image.setImage(result.data, autoLevels=False, levels=levels)
+        x0, x1, y1, y0 = result.extent
+        rect = QtCore.QRectF(x0, y0, x1 - x0 or 1, y1 - y0 or 1)
+        self.window.image.setRect(rect)
+        self.window.plot.setRange(rect, padding=0)
+        self.window.colorbar.setLevels(levels)
+        self.window.colorbar.axis.setLabel(result.label)
+        p = result.params
+        start, count = p['start_layer'], p['layer_count']
+        layers = f'Layer {start}' if count == 1 else f'Layers {start}–{start + count - 1} ({count} layers summed)'
+        title = 'Object Phase FFT' if p['display_mode'] == 'fft' else 'Object Phase'
+        title += f' — {layers}'
+        if abs(p['rotation_angle']) > 0.1:
+            title += f", Rotation: {p['rotation_angle']:.1f}°"
+        if p['crop_x'] or p['crop_y']:
+            title += f", Crop: {p['crop_x']}×{p['crop_y']} Center: {p['crop_center_x']},{p['crop_center_y']}"
+        if p['display_mode'] == 'fft':
+            title += f" — FFT (γ={p['fft_gamma']:.2f})"
+        self.window.title.setText(f'{title} [Range: {low:.3f} to {high:.3f}]')
+        if self._export_future is None:
+            self.window.status.setText(f'就绪 · {result.data.shape[1]}×{result.data.shape[0]} · 计算 {result.elapsed_ms:.1f} ms')
 
-        self._save_image_file(display_data, params, start_layer, end_layer, layer_count,
-                            extent, cbar_label, mode_suffix)
-
-    def _save_image_file(self, display_data, params, start_layer, end_layer, layer_count,
-                       extent, cbar_label, mode_suffix=""):
-        """保存图像文件"""
-        fov_info = DataProcessor.calculate_field_of_view(display_data.shape, self.probe_dx)
-        layer_info = f"Layer_{start_layer}" if layer_count == 1 else f"Layers_{start_layer}-{end_layer}"
-        rotation_angle = DataProcessor.normalize_angle(params['rotation_angle'])
-        rotation_info = f"_Rotation_{rotation_angle:.1f}deg" if abs(rotation_angle) > 0.1 else ""
-
-        filename = f"objp_{layer_info}{rotation_info}{fov_info}{mode_suffix}.png"
-        filepath = os.path.join(self.save_dir, filename)
-
-        save_fig, save_ax = plt.subplots(figsize=(10, 8))
-        save_fig.patch.set_facecolor('white')
-
-        save_im = save_ax.imshow(display_data, cmap=params['colormap'],
-                               interpolation='bilinear', extent=extent)
-        save_ax.set_aspect('equal', adjustable='box')
-
-        save_ax.set_xlim(extent[0], extent[1])
-        save_ax.set_ylim(extent[2], extent[3])
-        save_ax.set_xticks([])
-        save_ax.set_yticks([])
-        save_ax.set_xlabel('')
-        save_ax.set_ylabel('')
-
-        data_min, data_max = display_data.min(), display_data.max()
-        save_im.set_clim(data_min, data_max)
-
-        save_cb = plt.colorbar(save_im, ax=save_ax, pad=0.02)
-        save_cb.set_label(cbar_label, fontsize=14, labelpad=12, color='#34495e')
-        save_fig.savefig(filepath, dpi=600, bbox_inches='tight', facecolor='white')
-        plt.close(save_fig)
-
-        print(f"图像已保存到: {filepath}")
-
-    def save_all_videos_batch(self, event):
-        """批量保存所有视频和MAT文件"""
-        current_params = self.get_current_params()
-        ParameterManager.save_plot_params(self.save_dir, current_params)
-        base_save_dir = os.path.dirname(self.save_dir)
-        batch_save_videos_and_mat(self.all_pt_files, current_params, base_save_dir)
-
-    def next_region_clicked(self, event):
-        """处理下一个区域"""
-        global PROCESSING_STATE
-        PROCESSING_STATE['next_region'] = True
+    def _save_params(self):
         ParameterManager.save_plot_params(self.save_dir, self.get_current_params())
-        print("正在跳转到下一个区域...")
-        plt.close(self.fig)
 
-    def end_processing_clicked(self, event):
-        """结束处理"""
-        global PROCESSING_STATE
-        PROCESSING_STATE['end_processing'] = True
-        ParameterManager.save_plot_params(self.save_dir, self.get_current_params())
-        print("正在结束处理...")
-        plt.close(self.fig)
+    def _begin_export(self, operation, params, message):
+        if self._export_future is not None:
+            return
+        self._save_params()
+        for button in self.buttons.values():
+            button.setEnabled(False)
+        self.window.status.setText(message)
+        self._export_future = self._export_executor.submit(operation, params)
+        self._poll_timer.start()
+
+    def _request_image_export(self, *_):
+        self._begin_export(self._export_image, self.get_current_params(), '正在保存图像，仍可调整预览…')
+
+    def save_current_image(self, event=None):
+        """Synchronous export for scripts; the UI invokes it on its export worker."""
+        return self._export_image(self.get_current_params())
+
+    def _export_image(self, params):
+        from .image_export import save_image
+        # Independent engine: never race the preview cache or depend on its last frame.
+        result = RenderEngine(self.data, self.probe_dx).render(params)
+        path = save_image(result, self.save_dir, self.probe_dx)
+        return f'图像已保存到: {path}'
+
+    def save_all_videos_batch(self, event=None):
+        """Export a parameter snapshot in the background while preview stays usable."""
+        if not self.all_pt_files:
+            self.window.status.setText('未找到任何模型文件进行批量处理。')
+            return
+        self._begin_export(self._export_batch, self.get_current_params(), '正在导出视频和 MAT，仍可调整预览…')
+
+    def _export_batch(self, params):
+        from .video_generator import batch_save_videos_and_mat
+        failures = batch_save_videos_and_mat(self.all_pt_files, params, os.path.dirname(self.save_dir))
+        if failures:
+            raise RuntimeError('; '.join(failures))
+        return '视频和 MAT 导出完成。'
+
+    def next_region_clicked(self, event=None):
+        """Save settings and return control to the CLI's next region."""
+        if self._export_future is None:
+            self._close_action = 'next_region'
+            self.window.close()
+
+    def end_processing_clicked(self, event=None):
+        """Save settings and stop the CLI loop."""
+        if self._export_future is None:
+            self._close_action = 'end_processing'
+            self.window.close()
+
+    def _can_close(self):
+        if self._export_future is not None:
+            self.window.status.setText('正在导出，请完成后再关闭窗口。预览仍可使用。')
+            return False
+        return True
+
+    def _on_close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self._save_params()
+        # Closing the title bar follows the original behavior: advance to the next region.
+        PROCESSING_STATE[self._close_action or 'next_region'] = True
+        self._request_timer.stop()
+        self._poll_timer.stop()
+        self._save_timer.stop()
+        self._pending_params = None
+        self._render_executor.shutdown(wait=False)
+        self._export_executor.shutdown(wait=False)
