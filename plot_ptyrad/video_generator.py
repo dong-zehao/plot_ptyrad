@@ -173,24 +173,26 @@ def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir):
             model_data = DataProcessor.load_model_file(pt_file_path)
             file_optimizable_tensors = DataProcessor.extract_optimizable_tensors(model_data)
 
-            # 保存MAT文件
-            pt_filename = os.path.basename(pt_file_path)
-            ParameterManager.auto_save_mat_file(
-                region_save_dir, file_optimizable_tensors, pt_filename,
-                plot_params=current_params, source_path=pt_file_path)
+            # 检测MAT文件是否已存在
+            if check_if_processed(region_save_dir, 'mat'):
+                print(f"  区域 {region_number} 已存在MAT文件，跳过MAT文件保存...")
+            else:
+                # 保存MAT文件
+                pt_filename = os.path.basename(pt_file_path)
+                ParameterManager.auto_save_mat_file(
+                    region_save_dir, file_optimizable_tensors, pt_filename,
+                    plot_params=current_params, source_path=pt_file_path)
 
             # 检查视频是否已存在
             if check_if_processed(region_save_dir, 'video'):
                 print(f"  区域 {region_number} 已存在视频文件，跳过视频生成...")
-                continue
-
-            # 生成视频
-            file_data = DataProcessor.prepare_object_volume(file_optimizable_tensors['objp'])
-
-            region_video_generator = VideoGenerator(region_save_dir)
-            file_pt_dir = os.path.dirname(os.path.abspath(pt_file_path))
-            region_video_generator.save_video(file_data, current_params, file_pt_dir,
-                                     file_optimizable_tensors)
+            else:
+                # 生成视频
+                file_data = DataProcessor.prepare_object_volume(file_optimizable_tensors['objp'])
+                region_video_generator = VideoGenerator(region_save_dir)
+                file_pt_dir = os.path.dirname(os.path.abspath(pt_file_path))
+                region_video_generator.save_video(file_data, current_params, file_pt_dir,
+                                        file_optimizable_tensors)
 
         except Exception as e:
             print(f"处理文件 {os.path.basename(pt_file_path)} 时出错: {e}")

@@ -16,6 +16,10 @@ def check_if_processed(save_dir, check_type='general', force=False):
         # 对于视频生成，检查是否存在mp4文件
         video_files = glob.glob(os.path.join(save_dir, '*.mp4'))
         return len(video_files) > 0
+    elif check_type == 'mat':
+        # 对于MAT文件生成，检查是否存在.mat文件
+        mat_files = glob.glob(os.path.join(save_dir, '*.mat'))
+        return len(mat_files) > 0
     else:
         # 对于其他情况，检查是否存在png文件
         image_files = glob.glob(os.path.join(save_dir, '*.png'))
