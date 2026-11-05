@@ -20,8 +20,9 @@ _application = None
 class InteractivePlotter:
     """Keep the existing CLI and export workflow with native Qt interaction."""
 
-    def __init__(self, objp_tensor, pt_file_dir, save_dir, optimizable_tensors=None, all_pt_files=None):
+    def __init__(self, objp_tensor, pt_file_dir, save_dir, optimizable_tensors=None, all_pt_files=None, pt_filename=None):
         self.objp_tensor = objp_tensor
+        self.source_path = os.path.abspath(os.path.join(pt_file_dir, pt_filename or ""))
         self.pt_file_dir = pt_file_dir
         self.save_dir = save_dir
         self.optimizable_tensors = optimizable_tensors
@@ -52,6 +53,9 @@ class InteractivePlotter:
             _application = QtWidgets.QApplication([])
             _application.setQuitOnLastWindowClosed(False)
         self.window = UIComponents(self.data.shape, self.saved_params, self.initial_rotation)
+        self.window.source.setText(f'预览来源 · {self.source_path}')
+        self.window.source.setToolTip(self.source_path)
+        self.window.export_progress.connect(self._show_progress, QtCore.Qt.ConnectionType.QueuedConnection)
         self.sliders = self.window.controls
         self.textboxes = {name: control.editor for name, control in self.sliders.items()}
         self.gamma_slider = self.window.gamma
@@ -163,8 +167,15 @@ class InteractivePlotter:
             try:
                 message = future.result()
                 self.window.status.setText(message)
+                self.window.export_stage.setText(message)
+                self.window.export_stage.setToolTip(message)
+                self.window.progress.setRange(0, 1)
+                self.window.progress.setValue(1)
             except Exception as exc:
                 self.window.status.setText(f'导出失败：{exc}')
+                self.window.export_stage.setText(f'导出失败：{exc}')
+                self.window.export_stage.setToolTip(str(exc))
+                self.window.progress.hide()
                 print(f'导出失败：{exc}')
             for button in self.buttons.values():
                 button.setEnabled(True)
@@ -201,6 +212,17 @@ class InteractivePlotter:
     def _save_params(self):
         ParameterManager.save_plot_params(self.save_dir, self.get_current_params())
 
+    def _show_progress(self, stage, path, done, total):
+        if self._export_future is None:
+            return
+        self.window.export_stage.setText(stage)
+        self.window.export_stage.setToolTip(stage)
+        if self.window.export_path.text() != path:
+            self.window.export_path.setText(path)
+            self.window.export_path.setToolTip(path)
+        self.window.progress.setRange(0, total)
+        self.window.progress.setValue(done)
+
     def _begin_export(self, operation, params, message):
         if self._export_future is not None:
             return
@@ -208,7 +230,11 @@ class InteractivePlotter:
         for button in self.buttons.values():
             button.setEnabled(False)
         self.window.status.setText(message)
+        self.window.guide.hide()
+        for widget in (self.window.export_stage, self.window.export_path, self.window.progress):
+            widget.show()
         self._export_future = self._export_executor.submit(operation, params)
+        self._show_progress(message, self.source_path, 0, 0)
         self._poll_timer.start()
 
     def _request_image_export(self, *_):
@@ -234,7 +260,8 @@ class InteractivePlotter:
 
     def _export_batch(self, params):
         from .video_generator import batch_save_videos_and_mat
-        failures = batch_save_videos_and_mat(self.all_pt_files, params, os.path.dirname(self.save_dir))
+        failures = batch_save_videos_and_mat(self.all_pt_files, params, os.path.dirname(self.save_dir),
+                                             progress=self.window.export_progress.emit)
         if failures:
             raise RuntimeError('; '.join(failures))
         return '视频和 MAT 导出完成。'

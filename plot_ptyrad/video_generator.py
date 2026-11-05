@@ -11,8 +11,9 @@ import imageio.v2 as imageio
 from tqdm import tqdm
 
 from .config import MATPLOTLIB_CONFIG
-from .data_processor import DataProcessor, ParameterManager
+from .data_processor import DataProcessor
 from .file_utils import check_if_processed
+from .mat_export import save_model_mat_for_video
 
 
 class VideoGenerator:
@@ -71,7 +72,7 @@ class VideoGenerator:
 
         return frame_fig
 
-    def save_video(self, data, params, pt_file_dir, optimizable_tensors=None):
+    def save_video(self, data, params, pt_file_dir, optimizable_tensors=None, report=None):
         """保存视频文件"""
         rotation_angle = DataProcessor.normalize_angle(params['rotation_angle'])
         probe_dx, _ = DataProcessor.load_yml_params(pt_file_dir)
@@ -87,7 +88,7 @@ class VideoGenerator:
 
         slice_thickness = None
         if optimizable_tensors and 'slice_thickness' in optimizable_tensors:
-            slice_thickness = optimizable_tensors['slice_thickness'].detach().cpu().numpy().item()
+            slice_thickness = DataProcessor._to_numpy(optimizable_tensors['slice_thickness']).item()
 
         video_filename = f"objp_layers_video{rotation_info}{fov_info}{mode_suffix}.mp4"
         video_filepath = os.path.join(self.save_dir, video_filename)
@@ -99,6 +100,8 @@ class VideoGenerator:
 
         try:
             print(f"  生成视频帧...")
+            if report:
+                report(f"生成 {video_filename}", 0, data.shape[2])
             for layer_idx in tqdm(range(data.shape[2]), desc=f"  Video"):
                 frame_fig = self.generate_frame(data, layer_idx, params, slice_thickness, probe_dx)
 
@@ -107,8 +110,10 @@ class VideoGenerator:
                                 facecolor='white', pad_inches=0.1)
                 frames.append(temp_frame_path)
                 frame_fig.clear()
+                if report:
+                    report(f"生成 {video_filename}", layer_idx + 1, data.shape[2])
 
-            self._encode_video(frames, video_filepath)
+            self._encode_video(frames, video_filepath, report)
             print(f"  视频已保存: {video_filepath}")
 
         except Exception as e:
@@ -126,7 +131,7 @@ class VideoGenerator:
             except OSError:
                 pass
 
-    def _encode_video(self, frames, video_filepath):
+    def _encode_video(self, frames, video_filepath, report=None):
         """编码视频文件"""
         if not frames:
             return
@@ -140,18 +145,23 @@ class VideoGenerator:
         try:
             with imageio.get_writer(video_filepath, fps=5, codec='libx264',
                                   quality=8, macro_block_size=1) as writer:
-                for frame_path in frames:
+                stage = f"编码 {os.path.basename(video_filepath)}"
+                if report:
+                    report(stage, 0, len(frames))
+                for index, frame_path in enumerate(frames, 1):
                     image = imageio.imread(frame_path)
                     if image.shape[0] != h_crop or image.shape[1] != w_crop:
                         image = image[:h_crop, :w_crop]
                     writer.append_data(image)
+                    if report:
+                        report(stage, index, len(frames))
 
         except Exception as e:
             print(f"    MP4编码失败: {e}")
             raise
 
 
-def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir):
+def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir, progress=None):
     """批量生成视频和MAT文件，返回失败项供界面报告。"""
     failures = []
     print("开始批量生成视频和MAT文件...")
@@ -162,26 +172,25 @@ def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir):
 
     print(f"找到 {len(all_pt_files)} 个模型文件需要处理")
 
-    for pt_file_path, region_number in all_pt_files:
+    for index, (pt_file_path, region_number) in enumerate(all_pt_files, 1):
+        def report(stage, done=0, total=0):
+            if progress:
+                progress(f"{index}/{len(all_pt_files)} · {region_number} · {stage}",
+                         os.path.abspath(pt_file_path), done, total)
+
         try:
             print(f"\n处理文件: {os.path.basename(pt_file_path)} (区域: {region_number})")
             region_save_dir = os.path.join(base_save_dir, region_number)
             if not os.path.exists(region_save_dir):
                 os.makedirs(region_save_dir)
 
-            # 加载数据
-            model_data = DataProcessor.load_model_file(pt_file_path)
-            file_optimizable_tensors = DataProcessor.extract_optimizable_tensors(model_data)
-
-            # 保存MAT文件
-            pt_filename = os.path.basename(pt_file_path)
-            ParameterManager.auto_save_mat_file(
-                region_save_dir, file_optimizable_tensors, pt_filename,
-                plot_params=current_params, source_path=pt_file_path)
+            file_optimizable_tensors = save_model_mat_for_video(
+                pt_file_path, region_save_dir, current_params, report)
 
             # 检查视频是否已存在
             if check_if_processed(region_save_dir, 'video'):
                 print(f"  区域 {region_number} 已存在视频文件，跳过视频生成...")
+                report("已有视频，跳过生成", 1, 1)
                 continue
 
             # 生成视频
@@ -190,11 +199,11 @@ def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir):
             region_video_generator = VideoGenerator(region_save_dir)
             file_pt_dir = os.path.dirname(os.path.abspath(pt_file_path))
             region_video_generator.save_video(file_data, current_params, file_pt_dir,
-                                     file_optimizable_tensors)
+                                     file_optimizable_tensors, report)
 
         except Exception as e:
             print(f"处理文件 {os.path.basename(pt_file_path)} 时出错: {e}")
-            failures.append(f"{region_number}: {e}")
+            failures.append(f"{pt_file_path}: {e}")
 
     print("\n批量视频和MAT文件生成完成!")
     return failures

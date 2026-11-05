@@ -114,6 +114,32 @@ def test_export_uses_snapshot_and_prevents_unsafe_close(viewer, spin_until, monk
     assert viewer.buttons['end'].isEnabled()
 
 
+def test_batch_progress_shows_export_source_separately_from_preview(viewer, spin_until, monkeypatch):
+    from plot_ptyrad import video_generator
+
+    release = threading.Event()
+    source = str(viewer.save_dir) + '/other/model.h5'
+    viewer.all_pt_files = [(source, 'other')]
+
+    def batch(files, params, destination, progress):
+        progress('1/1 · other · 写入 model.mat', source, 2, 5)
+        assert release.wait(10)
+        return []
+
+    monkeypatch.setattr(video_generator, 'batch_save_videos_and_mat', batch)
+    viewer.buttons['save_all_videos'].click()
+    try:
+        spin_until(lambda: viewer.window.progress.value() == 2)
+        assert viewer.window.progress.maximum() == 5
+        assert viewer.window.export_path.text() == source
+        assert '写入 model.mat' in viewer.window.export_stage.text()
+        assert viewer.source_path in viewer.window.source.text()
+    finally:
+        release.set()
+    spin_until(lambda: viewer._export_future is None)
+    assert viewer.window.progress.text() == '100%'
+
+
 def test_export_failure_reenables_controls(viewer, spin_until, monkeypatch):
     def fail(params):
         raise OSError('disk full')

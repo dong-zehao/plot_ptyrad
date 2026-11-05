@@ -30,7 +30,7 @@ def plot_tensor_overview(optimizable_tensors, pt_file_dir, save_dir, all_pt_file
     if 'objp' in optimizable_tensors:
         print("\n正在创建objp交互式图像...")
         plotter = InteractivePlotter(optimizable_tensors['objp'], pt_file_dir, save_dir,
-                             optimizable_tensors, all_pt_files)
+                             optimizable_tensors, all_pt_files, pt_filename=pt_filename)
         plotter.create_interface()
     else:
         print("没有找到objp张量数据")

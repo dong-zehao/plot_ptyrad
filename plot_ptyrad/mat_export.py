@@ -44,6 +44,11 @@ def _collect_tensors(optimizable_tensors, source_path):
                     return
                 tensors[path] = node[()]
             source.visititems(collect)
+            # visititems 只访问硬链接的首个路径，并会跳过软链接。
+            for path in ("optimizable_tensors/objp", "optimizable_tensors/slice_thickness",
+                         "slice_thickness"):
+                if path not in tensors and path not in skipped and path in source:
+                    collect(path, source.get(path))
     else:
         for name, value in optimizable_tensors.items():
             array = DataProcessor._to_numpy(value)
@@ -65,6 +70,31 @@ def save_mat_file(save_dir, optimizable_tensors, filename=None, plot_params=None
         raise ValueError("导出 object_3d 需要 optimizable_tensors/objp")
     params = plot_params or {}
     tensors, skipped = _collect_tensors(optimizable_tensors, source_path)
+    return _write_mat(save_dir, filename, params, tensors, skipped, optimizable_tensors["objp"])
+
+
+def save_model_mat_for_video(source_path, save_dir, params, report):
+    """导出一个模型，并返回视频所需的原始数据，避免重复读取 HDF5。"""
+    filename = Path(source_path).name
+    report("读取 " + filename)
+    if Path(source_path).suffix.lower() in (".h5", ".hdf5"):
+        tensors, skipped = _collect_tensors(None, source_path)
+        objp = tensors.get("optimizable_tensors/objp")
+        if objp is None:
+            raise ValueError("导出 object_3d 需要 optimizable_tensors/objp")
+        video_inputs = {"objp": objp}
+        thickness = tensors.get("optimizable_tensors/slice_thickness", tensors.get("slice_thickness"))
+        if thickness is not None:
+            video_inputs["slice_thickness"] = thickness
+    else:
+        model = DataProcessor.load_model_file(source_path)
+        video_inputs = DataProcessor.extract_optimizable_tensors(model)
+        tensors, skipped = _collect_tensors(video_inputs, None)
+    _write_mat(save_dir, filename, params, tensors, skipped, video_inputs["objp"], report)
+    return video_inputs
+
+
+def _write_mat(save_dir, filename, params, tensors, skipped, objp, report=None):
     used = {"object_3d", "tensor_paths", "skipped_datasets"}
     mat_data = {}
     paths = []
@@ -73,8 +103,9 @@ def save_mat_file(save_dir, optimizable_tensors, filename=None, plot_params=None
         name = _mat_name(path, used)
         mat_data[name] = tensors[path]
         paths.append((name, path))
-    mat_data["object_3d"] = DataProcessor.transform_object_volume(
-        optimizable_tensors["objp"], params)
+    if report:
+        report("计算 object_3d")
+    mat_data["object_3d"] = DataProcessor.transform_object_volume(objp, params)
     mat_data["tensor_paths"] = np.asarray(paths, dtype=object).reshape(-1, 2)
     mat_data["skipped_datasets"] = np.asarray(skipped, dtype=object)
     os.makedirs(save_dir, exist_ok=True)
@@ -83,8 +114,14 @@ def save_mat_file(save_dir, optimizable_tensors, filename=None, plot_params=None
     try:
         with tempfile.NamedTemporaryFile(dir=save_dir, suffix=".mat", delete=False) as temporary:
             temporary_path = temporary.name
-        savemat(temporary_path, mat_data, format="5", do_compression=True,
-                long_field_names=True)
+            # 同一文件流中依次写入变量，SciPy 只在流开头写 MAT v5 文件头。
+            for index, (name, value) in enumerate(mat_data.items()):
+                if report:
+                    report(f"写入 {target.name} · {name}（按变量计）", index, len(mat_data))
+                savemat(temporary.file, {name: value}, format="5", do_compression=False,
+                        long_field_names=True)
+            if report:
+                report(f"写入 {target.name} · 完成", len(mat_data), len(mat_data))
         os.replace(temporary_path, target)
     finally:
         if temporary_path and os.path.exists(temporary_path):

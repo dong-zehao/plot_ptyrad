@@ -102,6 +102,7 @@ class UIComponents(QtWidgets.QWidget):
     """Keep the original left plot / bottom controls / right panels layout."""
 
     closing = QtCore.Signal()
+    export_progress = QtCore.Signal(str, str, int, int)
 
     def __init__(self, data_shape, saved_params, initial_rotation):
         super().__init__()
@@ -188,6 +189,22 @@ class UIComponents(QtWidgets.QWidget):
             f'• Data shape: {h}×{w} pixels, {depth} layers • Parameters auto-saved', self)
         guide.setWordWrap(True)
         self._place(guide, [0.07, 0.035, 0.67, 0.105])
+        self.guide = guide
+        self.source = QtWidgets.QLineEdit(self)
+        self.source.setReadOnly(True)
+        self.source.setAccessibleName('预览来源')
+        self._place(self.source, [0.07, 0.31, 0.68, 0.045])
+        self.export_stage = QtWidgets.QLabel(self)
+        self.export_stage.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.export_path = QtWidgets.QLineEdit(self)
+        self.export_path.setReadOnly(True)
+        self.export_path.setAccessibleName('正在导出的文件')
+        self.progress = QtWidgets.QProgressBar(self)
+        self._place(self.export_stage, [0.07, 0.115, 0.67, 0.036])
+        self._place(self.export_path, [0.07, 0.07, 0.67, 0.04])
+        self._place(self.progress, [0.07, 0.025, 0.67, 0.035])
+        for widget in (self.export_stage, self.export_path, self.progress):
+            widget.hide()
         self.status = QtWidgets.QLabel('', self)
         self.status.setWordWrap(True)
         self.status.setStyleSheet('color: #596b78; font-size: 11px;')

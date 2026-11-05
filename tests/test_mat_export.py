@@ -73,6 +73,31 @@ def test_repeat_export_updates_even_with_existing_mat_and_video(model, tmp_path)
         assert result["object_3d"].shape == (8 - 2 * crop, 10, 3)
 
 
+def test_batch_reads_each_numeric_dataset_once_and_reports_mat_progress(model, tmp_path, monkeypatch):
+    path, _, _ = model
+    region = tmp_path / "output" / "region"
+    region.mkdir(parents=True)
+    (region / "existing.mp4").touch()
+    reads = []
+    read = h5py.Dataset.__getitem__
+
+    def track(dataset, key):
+        reads.append(dataset.name)
+        return read(dataset, key)
+
+    monkeypatch.setattr(h5py.Dataset, "__getitem__", track)
+    updates = []
+    failures = batch_save_videos_and_mat(
+        [(str(path), "region")], DEFAULT_PARAMS, str(region.parent),
+        progress=lambda *event: updates.append(event))
+    assert not failures
+    assert len(reads) == len(set(reads)) == 8
+    writes = [(done, total) for stage, source, done, total in updates if "写入 model.mat" in stage]
+    assert writes == [(index, 11) for index in range(12)]
+    assert all(source == str(path) for _, source, _, _ in updates)
+    assert len(loadmat(region / "model.mat")["tensor_paths"]) == 8
+
+
 def test_pt_export(tmp_path):
     path = tmp_path / "model.pt"
     objp = torch.arange(120, dtype=torch.float32).reshape(1, 3, 5, 8)
@@ -117,7 +142,7 @@ def advance():
     for window in app.topLevelWidgets():
         if (window.isVisible() and hasattr(window, 'buttons')
                 and window.image.image is not None):
-            print('CLI_UI_READY')
+            print('CLI_UI_READY', window.source.text())
             window.buttons['next_region'].click()
 timer.timeout.connect(advance)
 timer.start(100)
@@ -131,6 +156,8 @@ runpy.run_module('plot_ptyrad', run_name='__main__')
     assert result.returncode == 0, result.stderr
     assert "成功处理了 2/2" in result.stdout
     assert result.stdout.count('CLI_UI_READY') == 2
+    for source in (path, second_path):
+        assert f'CLI_UI_READY 预览来源 · {source}' in result.stdout
 
 
 def test_image_video_and_mat_pipeline(model, tmp_path, qapp, spin_until):
