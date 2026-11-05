@@ -104,7 +104,7 @@ python -m plot_ptyrad --folder /path/to/parent_folder --file model_iter1000.hdf5
 - `object_3d` 的维度为 **(height, width, depth)**：将原始 `objp(mode, depth, height, width)` 沿 mode 取平均，再逐层应用当前 `plot_params` 的旋转、裁剪与裁剪中心偏移。保留全部深度层，不受 `start_layer`、`layer_count`、色图或 FFT 显示模式影响。裁剪坐标约定与现有界面一致：`crop_x` 对应第一空间维，`crop_y` 对应第二空间维。
 - HDF5 自带的 `object_3d` 不会被丢弃，会另分配不冲突的名称并记录在 `tensor_paths`。
 - 字符串、对象引用、复合记录和 null 数据集不是数值张量，会列入 `skipped_datasets` 并输出提示；HDF5 attributes 不作为张量导出。
-- 再次点击会更新对应模型的 MAT，以便保存最新的旋转裁剪参数；已有视频的跳过逻辑保持不变。写入失败时保留原 MAT。
+- 批量保存会跳过当前模型已有的同名 MAT，并独立检查区域内是否已有视频。若需按新的旋转或裁剪参数重新导出，请先移走该模型的 MAT，再点击保存。
 - `.pt` 仍导出 `optimizable_tensors` 中的数值张量，并同样新增 `object_3d`。
 
 批量保存时，每个 HDF5 的数值数据只读取一次，供 MAT 导出和视频生成共用。MAT 默认不压缩，以较大的磁盘占用换取较短的写入时间。采用 SciPy MAT v5 格式，单个变量受该格式约 2 GB 的大小限制，超限将报告保存失败。

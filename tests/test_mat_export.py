@@ -60,17 +60,32 @@ def test_all_hdf5_tensors_and_transformed_volume(model, tmp_path):
     assert "label" in str(result["skipped_datasets"])
 
 
-def test_repeat_export_updates_even_with_existing_mat_and_video(model, tmp_path):
-    path, objp, _ = model
+def test_repeat_export_skips_existing_outputs_without_reading_source(model, tmp_path):
+    path, _, _ = model
     destination = tmp_path / "Data_Saved"
     region = destination / "region"
     region.mkdir(parents=True)
     (region / "existing.mp4").touch()
-    for crop in (0, 1):
-        params = dict(DEFAULT_PARAMS, crop_x=crop)
-        batch_save_videos_and_mat([(str(path), "region")], params, str(destination))
-        result = loadmat(region / "model.mat")
-        assert result["object_3d"].shape == (8 - 2 * crop, 10, 3)
+    (region / "other.mat").touch()
+    files = [(str(path), "region")]
+    assert not batch_save_videos_and_mat(files, DEFAULT_PARAMS, str(destination))
+    target = region / "model.mat"
+    assert loadmat(target)["object_3d"].shape == (8, 10, 3)
+    original = target.read_bytes()
+    path.unlink()
+    assert not batch_save_videos_and_mat(files, dict(DEFAULT_PARAMS, crop_x=1), str(destination))
+    assert target.read_bytes() == original
+
+
+def test_existing_mat_still_generates_missing_video(model, tmp_path):
+    path, _, _ = model
+    region = tmp_path / "output" / "region"
+    region.mkdir(parents=True)
+    (region / "model.mat").write_bytes(b"existing")
+    failures = batch_save_videos_and_mat([(str(path), "region")], DEFAULT_PARAMS, str(region.parent))
+    assert not failures
+    assert (region / "model.mat").read_bytes() == b"existing"
+    assert any(p.stat().st_size for p in region.glob("*.mp4"))
 
 
 def test_batch_reads_each_numeric_dataset_once_and_reports_mat_progress(model, tmp_path, monkeypatch):
