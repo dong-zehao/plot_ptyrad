@@ -2,11 +2,13 @@
 视频生成模块
 """
 
+from io import BytesIO
 import os
 import tempfile
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.colors import Normalize
 import imageio.v2 as imageio
 from tqdm import tqdm
 
@@ -22,14 +24,8 @@ class VideoGenerator:
     def __init__(self, save_dir):
         self.save_dir = save_dir
 
-    def generate_frame(self, data, layer_idx, params, slice_thickness=None, probe_dx=None):
-        """生成单帧图像"""
-        current_data = data[:, :, layer_idx]
-
-        # 使用render_view统一处理变换和显示
-        display_data, extent, cbar_label = DataProcessor.render_view(
-            current_data, params, probe_dx)
-
+    @staticmethod
+    def _frame_title(layer_idx, params, slice_thickness):
         title_prefix = ""
         if params.get('display_mode') == 'fft':
             gamma = params.get('fft_gamma', 0.0)
@@ -41,6 +37,16 @@ class VideoGenerator:
             depth_nm = layer_idx * slice_thickness / 10.0
             depth_info = f" (Depth: {depth_nm:.1f} nm)"
 
+        return f"{title_prefix}Layer {layer_idx}{depth_info}"
+
+    def generate_frame(self, data, layer_idx, params, slice_thickness=None, probe_dx=None):
+        """生成单帧图像"""
+        current_data = data[:, :, layer_idx]
+
+        # 使用render_view统一处理变换和显示
+        display_data, extent, cbar_label = DataProcessor.render_view(
+            current_data, params, probe_dx)
+
         # 创建图像
         frame_fig = Figure(figsize=(10, 8))
         FigureCanvasAgg(frame_fig)
@@ -49,7 +55,7 @@ class VideoGenerator:
 
         frame_im = frame_ax.imshow(display_data, cmap=params['colormap'],
                                  interpolation='bilinear', extent=extent)
-        frame_ax.set_title(f"{title_prefix}Layer {layer_idx}{depth_info}",
+        frame_ax.set_title(self._frame_title(layer_idx, params, slice_thickness),
                          fontsize=16, fontweight='bold', color='#2c3e50')
 
         frame_ax.set_xticks([])
@@ -95,70 +101,61 @@ class VideoGenerator:
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-        frames = []
-        temp_dir = tempfile.mkdtemp()
-
-        try:
-            print(f"  生成视频帧...")
-            if report:
-                report(f"生成 {video_filename}", 0, data.shape[2])
-            for layer_idx in tqdm(range(data.shape[2]), desc=f"  Video"):
-                frame_fig = self.generate_frame(data, layer_idx, params, slice_thickness, probe_dx)
-
-                temp_frame_path = os.path.join(temp_dir, f"frame_{layer_idx:04d}.png")
-                frame_fig.savefig(temp_frame_path, dpi=150, bbox_inches='tight',
-                                facecolor='white', pad_inches=0.1)
-                frames.append(temp_frame_path)
-                frame_fig.clear()
-                if report:
-                    report(f"生成 {video_filename}", layer_idx + 1, data.shape[2])
-
-            self._encode_video(frames, video_filepath, report)
-            print(f"  视频已保存: {video_filepath}")
-
-        except Exception as e:
-            print(f"  生成视频失败: {e}")
-            raise
-
-        finally:
-            for frame_path in frames:
-                try:
-                    os.remove(frame_path)
-                except OSError:
-                    pass
-            try:
-                os.rmdir(temp_dir)
-            except OSError:
-                pass
-
-    def _encode_video(self, frames, video_filepath, report=None):
-        """编码视频文件"""
-        if not frames:
+        total = data.shape[2]
+        if total == 0:
             return
 
-        first_frame = imageio.imread(frames[0])
-        h, w = first_frame.shape[:2]
-
-        h_crop = h - (h % 2)
-        w_crop = w - (w % 2)
-
+        figure = self.generate_frame(data, 0, params, slice_thickness, probe_dx)
+        figure.set_dpi(150)
+        axes = figure.axes[0]
+        image = axes.images[0]
+        stage = f"生成并编码 {video_filename}"
         try:
-            with imageio.get_writer(video_filepath, fps=5, codec='libx264',
-                                  quality=8, macro_block_size=1) as writer:
-                stage = f"编码 {os.path.basename(video_filepath)}"
-                if report:
-                    report(stage, 0, len(frames))
-                for index, frame_path in enumerate(frames, 1):
-                    image = imageio.imread(frame_path)
-                    if image.shape[0] != h_crop or image.shape[1] != w_crop:
-                        image = image[:h_crop, :w_crop]
-                    writer.append_data(image)
-                    if report:
-                        report(stage, index, len(frames))
+            if report:
+                report(stage, 0, total)
+            # 仅将完整编码的视频移入输出目录，失败时可重新生成。
+            with tempfile.TemporaryDirectory(dir=self.save_dir) as work_dir:
+                output = os.path.join(work_dir, video_filename)
+                with imageio.get_writer(output, fps=5, codec='libx264',
+                                        quality=8, macro_block_size=1) as writer:
+                    for layer_idx in tqdm(range(total), desc="  Video"):
+                        if layer_idx:
+                            display_data, _, _ = DataProcessor.render_view(
+                                data[:, :, layer_idx], params, probe_dx)
+                            image.set_data(display_data)
+                            if params.get('display_mode') == 'fft':
+                                image.set_norm(Normalize(display_data.min(), display_data.max()))
+                            axes.title.set_text(self._frame_title(layer_idx, params, slice_thickness))
 
-        except Exception as e:
-            print(f"    MP4编码失败: {e}")
-            raise
+                        frame = self._render_pixels(figure)
+                        if layer_idx == 0:
+                            height, width = frame.shape[:2]
+                            height -= height % 2
+                            width -= width % 2
+                        # 色条刻度长度可能逐层变化，编码画幅以首帧为准。
+                        frame = frame[:height, :width]
+                        if frame.shape[:2] != (height, width):
+                            frame = np.pad(frame, ((0, height - frame.shape[0]),
+                                                   (0, width - frame.shape[1]), (0, 0)),
+                                           constant_values=255)
+                        writer.append_data(frame)
+                        if report:
+                            report(stage, layer_idx + 1, total)
+                os.replace(output, video_filepath)
+            print(f"  视频已保存: {video_filepath}")
+        finally:
+            figure.clear()
+
+    @staticmethod
+    def _render_pixels(figure):
+        # 沿用 PNG 导出的紧边界和留白，将原始 RGBA 像素直接传给编码器。
+        renderer = figure.canvas.get_renderer()
+        bounds = figure.get_tightbbox(renderer).padded(0.1)
+        with BytesIO() as buffer:
+            figure.savefig(buffer, format='raw', dpi=figure.dpi,
+                           bbox_inches=bounds, facecolor='white')
+            width = int(bounds.width * figure.dpi)
+            return np.frombuffer(buffer.getvalue(), dtype=np.uint8).reshape(-1, width, 4)
 
 
 def batch_save_videos_and_mat(all_pt_files, current_params, base_save_dir, progress=None):
