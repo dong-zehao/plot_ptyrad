@@ -53,7 +53,8 @@ class InteractivePlotter:
             _application = QtWidgets.QApplication([])
             _application.setQuitOnLastWindowClosed(False)
         self.window = UIComponents(self.data.shape, self.saved_params, self.initial_rotation)
-        self.window.source.setText(f'预览来源 · {self.source_path}')
+        region_name = os.path.basename(os.path.normpath(self.save_dir))
+        self.window.source.setText(f'预览来源 · {region_name}')
         self.window.source.setToolTip(self.source_path)
         self.window.export_progress.connect(self._show_progress, QtCore.Qt.ConnectionType.QueuedConnection)
         self.sliders = self.window.controls

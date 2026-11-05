@@ -133,7 +133,8 @@ def test_batch_progress_shows_export_source_separately_from_preview(viewer, spin
         assert viewer.window.progress.maximum() == 5
         assert viewer.window.export_path.text() == source
         assert '写入 model.mat' in viewer.window.export_stage.text()
-        assert viewer.source_path in viewer.window.source.text()
+        assert viewer.window.source.text() == '预览来源 · region'
+        assert viewer.window.source.toolTip() == viewer.source_path
     finally:
         release.set()
     spin_until(lambda: viewer._export_future is None)
